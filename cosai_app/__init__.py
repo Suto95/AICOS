@@ -1,0 +1,1 @@
+"""CosAI app package."""
