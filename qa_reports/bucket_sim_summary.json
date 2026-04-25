@@ -1,0 +1,130 @@
+{
+  "generated_at": "2026-04-25T09:42:27.134713",
+  "mode": "mock_extract",
+  "fixture_path": "tests/fixtures/aicos_bucket_sim_fixtures.json",
+  "thresholds": {
+    "bucket_accuracy_pct": 85.0,
+    "filter_accuracy_pct": 90.0
+  },
+  "passed": true,
+  "total_cases": 200,
+  "filter_accuracy_pct": 100.0,
+  "bucket_accuracy_pct": 99.41,
+  "task_like_cases_for_bucket_eval": 170,
+  "per_bucket": {
+    "DO NOW": {
+      "tp": 39,
+      "fp": 0,
+      "fn": 0,
+      "precision_pct": 100.0,
+      "recall_pct": 100.0
+    },
+    "SCHEDULE": {
+      "tp": 30,
+      "fp": 0,
+      "fn": 0,
+      "precision_pct": 100.0,
+      "recall_pct": 100.0
+    },
+    "DELEGATE": {
+      "tp": 39,
+      "fp": 0,
+      "fn": 0,
+      "precision_pct": 100.0,
+      "recall_pct": 100.0
+    },
+    "REVIEW LATER": {
+      "tp": 31,
+      "fp": 0,
+      "fn": 1,
+      "precision_pct": 100.0,
+      "recall_pct": 96.88
+    },
+    "ELIMINATE": {
+      "tp": 30,
+      "fp": 1,
+      "fn": 0,
+      "precision_pct": 96.77,
+      "recall_pct": 100.0
+    }
+  },
+  "confusion_matrix": {
+    "DO NOW": {
+      "DO NOW": 39,
+      "SCHEDULE": 0,
+      "DELEGATE": 0,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 0,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "SCHEDULE": {
+      "DO NOW": 0,
+      "SCHEDULE": 30,
+      "DELEGATE": 0,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 0,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "DELEGATE": {
+      "DO NOW": 0,
+      "SCHEDULE": 0,
+      "DELEGATE": 39,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 0,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "REVIEW LATER": {
+      "DO NOW": 0,
+      "SCHEDULE": 0,
+      "DELEGATE": 0,
+      "REVIEW LATER": 31,
+      "ELIMINATE": 1,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "ELIMINATE": {
+      "DO NOW": 0,
+      "SCHEDULE": 0,
+      "DELEGATE": 0,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 30,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "FILTERED_OUT": {
+      "DO NOW": 0,
+      "SCHEDULE": 0,
+      "DELEGATE": 0,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 0,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    },
+    "ERROR": {
+      "DO NOW": 0,
+      "SCHEDULE": 0,
+      "DELEGATE": 0,
+      "REVIEW LATER": 0,
+      "ELIMINATE": 0,
+      "FILTERED_OUT": 0,
+      "ERROR": 0
+    }
+  },
+  "mismatch_count": 1,
+  "top_mismatches_by_reason": {
+    "bucket_mismatch": [
+      {
+        "id": "edge_noise_with_action_word",
+        "reason": "bucket_mismatch",
+        "expected_bucket": "REVIEW LATER",
+        "predicted_bucket": "ELIMINATE",
+        "subject": "Newsletter reminder",
+        "sender": "digest@ads.example.com",
+        "notes": "Contains action word can pass filter"
+      }
+    ]
+  }
+}

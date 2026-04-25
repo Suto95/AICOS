@@ -1,0 +1,10 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+.vscode/
+.DS_Store
+gmailcred.json
+token.pickle
+secrets.toml
+supbase_cred.txt

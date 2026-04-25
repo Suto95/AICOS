@@ -1,0 +1,19 @@
+{"timestamp": "2026-04-15T12:41:32.870662", "event_type": "task_marked_done", "task_id": 1, "task_text": "cosai test updating data from backend", "payload": {"bucket": "REVIEW LATER"}}
+{"timestamp": "2026-04-16T10:21:44.304080", "event_type": "clarifications_applied", "task_id": 5, "task_text": "Prepare the Gantt for cosai test", "payload": {"fields": ["deadline"], "predicted_bucket": "SCHEDULE", "final_bucket": "SCHEDULE"}}
+{"timestamp": "2026-04-17T01:26:27.301571", "event_type": "bucket_changed", "task_id": 3, "task_text": "cosai test design changes required", "payload": {"to_bucket": "DO NOW"}}
+{"timestamp": "2026-04-17T01:27:24.268157", "event_type": "clarifications_applied", "task_id": 0, "task_text": "Correct COSAI TEST", "payload": {"fields": ["outcome_value", "strategic_alignment"]}}
+{"timestamp": "2026-04-17T11:18:44.689176", "event_type": "bucket_changed", "task_id": 1, "task_text": "Correct COSAI TEST", "payload": {"to_bucket": "SCHEDULE"}}
+{"timestamp": "2026-04-17T11:22:12.934066", "event_type": "clarifications_applied", "task_id": 0, "task_text": "Draft Proposal for Acme Corp", "payload": {"fields": ["deadline"]}}
+{"timestamp": "2026-04-17T11:22:33.662821", "event_type": "clarifications_applied", "task_id": 0, "task_text": "Draft Proposal for Acme Corp", "payload": {"fields": ["penalty_for_delay"]}}
+{"timestamp": "2026-04-17T11:22:54.479686", "event_type": "task_marked_done", "task_id": 2, "task_text": "Updating data from backend for cosai test", "payload": {"via_table_cta": true, "reason": "The sender explicitly states 'this is done' twice, indicating task completion, but no further confirmation or details are provided.", "evidence": "'this is done' repeated twice in the email"}}
+{"timestamp": "2026-04-17T11:22:54.524227", "event_type": "order_changed", "task_id": 3, "task_text": "cosai test design changes required", "payload": {"new_order": 2}}
+{"timestamp": "2026-04-17T11:22:54.524561", "event_type": "order_changed", "task_id": 4, "task_text": "Implement download feature for COSAI test report from dashboard", "payload": {"new_order": 3}}
+{"timestamp": "2026-04-17T11:22:58.857918", "event_type": "task_marked_done", "task_id": 0, "task_text": "Draft Proposal for Acme Corp", "payload": {"via_table_cta": true, "reason": "Email states 'Draft proposal completed and shared,' which strongly implies task completion but lacks explicit confirmation.", "evidence": "'Draft proposal completed and shared.'"}}
+{"timestamp": "2026-04-17T11:22:58.905184", "event_type": "order_changed", "task_id": 1, "task_text": "Correct COSAI TEST", "payload": {"new_order": 0}}
+{"timestamp": "2026-04-17T11:23:03.427220", "event_type": "task_marked_done", "task_id": 1, "task_text": "Correct COSAI TEST", "payload": {"via_table_cta": true, "reason": "Email states 'testing done and dev corrected' indicating task progress or completion but lacks explicit confirmation of task closure.", "evidence": "'testing done and dev corrected'"}}
+{"timestamp": "2026-04-17T11:23:09.492485", "event_type": "task_reopened", "task_id": 0, "task_text": "Draft Proposal for Acme Corp", "payload": {"bucket": "DO NOW"}}
+{"timestamp": "2026-04-17T11:23:36.321418", "event_type": "task_created_manual", "task_id": 5, "task_text": "test task for addition feature", "payload": {"bucket": "SCHEDULE"}}
+{"timestamp": "2026-04-17T11:23:36.367260", "event_type": "order_changed", "task_id": 5, "task_text": "test task for addition feature", "payload": {"new_order": 2}}
+{"timestamp": "2026-04-17T11:23:45.289748", "event_type": "order_changed", "task_id": 5, "task_text": "test task for addition feature", "payload": {"new_order": 1}}
+{"timestamp": "2026-04-17T11:23:53.158597", "event_type": "order_changed", "task_id": 5, "task_text": "test task for addition feature", "payload": {"new_order": 3}}
+{"timestamp": "2026-04-19T11:30:39.334274", "event_type": "reason_generated", "task_id": 3, "task_text": "cosai test design changes required", "payload": {}}

@@ -12,6 +12,47 @@ from .config import (
 )
 from .data import get_learned_weight, load_task_event_history
 
+NOISE_SUBJECT_PATTERNS = [
+    r"\bunsubscribe\b",
+    r"\bnewsletter\b",
+    r"\bdigest\b",
+    r"\bpromo\b",
+    r"\bpromotion\b",
+    r"\boffer\b",
+    r"\bsale\b",
+    r"\bdiscount\b",
+    r"\bwebinar\b",
+    r"\bevent reminder\b",
+    r"\bno-reply\b",
+    r"\bnotification\b",
+]
+
+ACTION_HINT_PATTERNS = [
+    r"\bplease\b",
+    r"\bcan you\b",
+    r"\bneed\b",
+    r"\brequired\b",
+    r"\baction required\b",
+    r"\bdeadline\b",
+    r"\bdue\b",
+    r"\bby (today|tomorrow|monday|tuesday|wednesday|thursday|friday)\b",
+    r"\bapprove\b",
+    r"\breview\b",
+    r"\bfollow up\b",
+    r"\brespond\b",
+    r"\bsend\b",
+    r"\bcomplete\b",
+    r"\bsubmit\b",
+    r"\bfix\b",
+    r"\brequest\b",
+    r"\breminder\b",
+    r"\btodo\b",
+    r"\bto do\b",
+    r"\btask\b",
+    r"\bmeeting\b",
+    r"\binvoice\b",
+]
+
 
 # ---------- generic utils ----------
 def safe_json_parse(content):
@@ -93,6 +134,129 @@ def message_dedupe_key(message):
     subject = (message.get("subject") or message.get("text") or "").strip().lower()
     text_sig = " ".join(sorted(tokenize_text(get_message_text_for_done(message))))[:180]
     return f"fallback:{thread_id}|{sender}|{subject}|{text_sig}"
+
+
+def _sender_domain(sender):
+    raw = (sender or "").strip().lower()
+    if not raw:
+        return ""
+    match = re.search(r"([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})", raw)
+    email = match.group(1) if match else raw
+    if "@" not in email:
+        return ""
+    return email.split("@", 1)[1]
+
+
+def derive_user_hint_profile(
+    events,
+    account_id=None,
+    min_action_count=2,
+    min_noise_count=2,
+    min_noise_domain_count=2,
+):
+    action_token_counts = {}
+    noise_token_counts = {}
+    noise_sender_counts = {}
+
+    for event in events or []:
+        payload = event.get("payload") or {}
+        event_account_id = payload.get("account_id")
+        if account_id is not None and event_account_id is not None:
+            try:
+                if int(event_account_id) != int(account_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+        tokens = {t for t in tokenize_text(event.get("task_text", "")) if len(t) >= 4 and not t.isdigit()}
+        event_type = event.get("event_type")
+
+        if event_type == "task_created_manual":
+            for t in tokens:
+                action_token_counts[t] = action_token_counts.get(t, 0) + 1
+            continue
+
+        if event_type == "task_deleted":
+            # Deletions from email-sourced tasks are strong noise signals.
+            if payload.get("source") and payload.get("source") != "email":
+                continue
+            for t in tokens:
+                noise_token_counts[t] = noise_token_counts.get(t, 0) + 1
+            sender_domain = payload.get("sender_domain") or _sender_domain(payload.get("sender", ""))
+            if sender_domain:
+                noise_sender_counts[sender_domain] = noise_sender_counts.get(sender_domain, 0) + 1
+
+    return {
+        "action_tokens": {k for k, v in action_token_counts.items() if v >= min_action_count},
+        "noise_tokens": {k for k, v in noise_token_counts.items() if v >= min_noise_count},
+        "noise_sender_domains": {k for k, v in noise_sender_counts.items() if v >= min_noise_domain_count},
+    }
+
+
+def merge_hint_profiles(*profiles):
+    merged = {
+        "action_tokens": set(),
+        "noise_tokens": set(),
+        "noise_sender_domains": set(),
+    }
+    for p in profiles:
+        if not p:
+            continue
+        merged["action_tokens"].update(p.get("action_tokens", set()))
+        merged["noise_tokens"].update(p.get("noise_tokens", set()))
+        merged["noise_sender_domains"].update(p.get("noise_sender_domains", set()))
+    return merged
+
+
+def build_compact_message_context(message, max_body_chars=500):
+    subject = (message.get("subject") or message.get("text") or "").strip()
+    snippet = (message.get("snippet") or "").strip()
+    body = (message.get("body") or "").strip()
+    if len(body) > max_body_chars:
+        body = body[:max_body_chars]
+    sender = (message.get("sender") or "").strip()
+
+    parts = []
+    if subject:
+        parts.append(f"Subject: {subject}")
+    if sender:
+        parts.append(f"From: {sender}")
+    if snippet:
+        parts.append(f"Snippet: {snippet}")
+    if body:
+        parts.append(f"Body: {body}")
+    return "\n".join(parts)
+
+
+def is_task_like_message(message, hint_profile=None):
+    subject = (message.get("subject") or message.get("text") or "").lower()
+    snippet = (message.get("snippet") or "").lower()
+    sender = (message.get("sender") or "").lower()
+    hay = " ".join([subject, snippet, sender])
+    token_set = tokenize_text(f"{subject} {snippet}")
+    sender_domain = _sender_domain(sender)
+    has_action_phrase = any(re.search(p, hay) for p in ACTION_HINT_PATTERNS)
+
+    if not hay.strip():
+        return False
+
+    if hint_profile:
+        action_overlap = token_set & hint_profile.get("action_tokens", set())
+        noise_overlap = token_set & hint_profile.get("noise_tokens", set())
+        noise_sender_domains = hint_profile.get("noise_sender_domains", set())
+
+        if action_overlap:
+            return True
+        if sender_domain and sender_domain in noise_sender_domains and not has_action_phrase:
+            return False
+        if len(noise_overlap) >= 2 and not has_action_phrase:
+            return False
+
+    if any(re.search(p, hay) for p in NOISE_SUBJECT_PATTERNS):
+        # Still allow if strong action words exist.
+        return has_action_phrase
+
+    return has_action_phrase
 
 
 # ---------- inference layer ----------
@@ -267,10 +431,12 @@ def infer_missing_signals(task, prefs, memory):
 
 # ---------- scoring ----------
 def extract_task(message):
+    compact_text = build_compact_message_context(message)
     prompt = f"""
 Extract structured task.
 
-Message: "{message['text']}"
+Message:
+{compact_text}
 
 Return JSON:
 - task
@@ -574,7 +740,7 @@ Rules:
     }
 
 
-def detect_done_suggestions(results, messages, suggest_threshold=0.4):
+def detect_done_suggestions(results, messages, suggest_threshold=0.4, user_id=None):
     open_tasks = [r for r in results if r.get("status", "open") == "open"]
     suggestions_by_task = {}
     seen_messages = set()
@@ -589,7 +755,7 @@ def detect_done_suggestions(results, messages, suggest_threshold=0.4):
         best_for_message = None
 
         for retrieval_score, task in candidates:
-            history = load_task_event_history(task["id"], limit=8)
+            history = load_task_event_history(task["id"], limit=8, user_id=user_id)
             msg_text = get_message_text_for_done(msg)
             verdict = llm_done_verdict(
                 email_text=msg_text,
@@ -642,10 +808,12 @@ def detect_done_suggestions(results, messages, suggest_threshold=0.4):
 
 
 # ---------- pipeline ----------
-def analyze_messages(messages, prefs, memory):
+def analyze_messages(messages, prefs, memory, hint_profile=None):
     results = []
 
-    for i, msg in enumerate(messages):
+    filtered_messages = [m for m in messages if is_task_like_message(m, hint_profile=hint_profile)]
+
+    for i, msg in enumerate(filtered_messages):
         try:
             task = normalize_task(extract_task(msg))
             if not task or not task.get("task"):

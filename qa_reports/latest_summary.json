@@ -1,0 +1,79 @@
+{
+  "generated_at": "2026-04-25T09:42:27.204112",
+  "total_change_cases": 40,
+  "automated_mapped_cases": 19,
+  "uncovered_cases": 21,
+  "automated_coverage_pct": 47.5,
+  "suite_results": [
+    {
+      "name": "unit",
+      "path": "tests/aicos",
+      "passed": true,
+      "missing": false,
+      "ran": 6,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "integration",
+      "path": "tests/aicos_integration",
+      "passed": true,
+      "missing": false,
+      "ran": 5,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "e2e",
+      "path": "tests/aicos_e2e",
+      "passed": true,
+      "missing": false,
+      "ran": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    {
+      "name": "bucket_sim",
+      "path": "tools/simulate_buckets.py",
+      "passed": true,
+      "missing": false,
+      "ran": 1,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  ],
+  "test_run": {
+    "passed": true,
+    "ran": 13,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "uncovered_case_text": [
+    "[v0.9-beta - 2026-04-21::Added] Account Setup page for connecting and managing Gmail accounts.",
+    "[v0.9-beta - 2026-04-21::Changed] Rebranded product UI text from **CosAI** to **AICOS**.",
+    "[v0.9-beta - 2026-04-21::Changed] Scope messaging replaced with user-friendly trust statement.",
+    "[v0.9-beta - 2026-04-21::Changed] Preferences view in System Insights converted to table format and renamed for clarity.",
+    "[v0.8 - 2026-04-20::Added] Modular code split:",
+    "[v0.8 - 2026-04-20::Added] Backward-compatible wrapper entrypoint.",
+    "[v0.8 - 2026-04-20::Changed] UI shifted to table-first workflow with editable task board and row-level actions.",
+    "[v0.8 - 2026-04-20::Changed] Added undo stack support and manual rank ordering.",
+    "[v0.7 - 2026-04-20::Added] Done suggestion system (retrieval + LLM verifier):",
+    "[v0.7 - 2026-04-20::Added] Deduping safeguards:",
+    "[v0.6 - 2026-04-20::Added] Inference MVP for missing signal completion:",
+    "[v0.6 - 2026-04-20::Added] Long-term memory storage for clarified signals.",
+    "[v0.6 - 2026-04-20::Added] Confidence-threshold based selective auto-fill.",
+    "[v0.5 - 2026-04-19::Added] Preference learning feedback loop:",
+    "[v0.4 - 2026-04-19::Added] Adaptive clarification wizard:",
+    "[v0.4 - 2026-04-19::Added] Task reasoning generation action.",
+    "[v0.3 - 2026-04-19::Added] Action layer:",
+    "[v0.3 - 2026-04-19::Added] Manual task creation and persistent status updates.",
+    "[v0.1 - 2026-04-18::Added] Gmail ingestion pipeline with token refresh support.",
+    "[v0.1 - 2026-04-18::Added] Rich message payload extraction:",
+    "[v0.1 - 2026-04-18::Added] Initial LLM structured task extraction."
+  ]
+}

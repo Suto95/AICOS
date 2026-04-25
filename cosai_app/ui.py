@@ -1,19 +1,38 @@
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 
 import pandas as pd
 import streamlit as st
 
-from gmail_ingest import fetch_emails
+import gmail_ingest
+from .accounts import (
+    DEFAULT_GMAIL_QUERY_FILTER,
+    get_active_account,
+    list_connected_accounts,
+    update_account_fetch_success,
+    update_account_health,
+    update_account_tokens,
+)
 from .config import BUCKET_ORDER
-from .data import append_event, append_memory_entry
+from .data import append_event, append_memory_entry, load_events, load_events_all_users
 from .logic import (
     analyze_messages,
+    derive_user_hint_profile,
     detect_done_suggestions,
     generate_reasoning,
+    merge_hint_profiles,
     score_task,
     select_questions,
 )
 from .state import init_state, push_undo_snapshot, undo_last_action
+
+FETCH_LIMIT = 200
+DURATION_OPTIONS = {
+    "Last 3 hours": timedelta(hours=3),
+    "Last 24 hours": timedelta(hours=24),
+    "Last 3 days": timedelta(days=3),
+    "Last 7 days": timedelta(days=7),
+}
 
 
 def get_result_by_id(results, task_id):
@@ -23,37 +42,136 @@ def get_result_by_id(results, task_id):
     return None
 
 
-def render_task_board():
-    init_state()
+def _filter_messages_by_duration(messages, window):
+    now = datetime.now().astimezone()
+    cutoff = now - window
+    filtered = []
+    for msg in messages:
+        raw_ts = msg.get("timestamp", "")
+        if not raw_ts:
+            continue
+        try:
+            ts = datetime.fromisoformat(raw_ts)
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=now.tzinfo)
+        if ts >= cutoff:
+            filtered.append(msg)
+    return filtered
 
-    st.title("CosAI Prioritizer")
-    st.caption("Table-first workflow: prioritize, reassign, add signals, reason, done, and delete.")
 
-    top_a, top_b, top_c, top_d, top_e = st.columns([2, 1.2, 1.2, 0.8, 0.8])
+def _sender_domain(sender):
+    raw = (sender or "").strip().lower()
+    match = re.search(r"([a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,})", raw)
+    email = match.group(1) if match else raw
+    if "@" not in email:
+        return ""
+    return email.split("@", 1)[1]
+
+
+def render_task_board(user):
+    try:
+        init_state(user_id=user["id"])
+    except TypeError:
+        init_state()
+
+    st.title("AICOS Prioritizer")
+
+    connected_accounts = [a for a in list_connected_accounts(user["id"]) if a.get("status") == "active"]
+    if not connected_accounts:
+        st.warning("No active email account connected. Open `Account Setup` to connect Gmail.")
+        return
+
+    account_options = {f"{a.get('account_email') or 'Gmail'} (id {a['id']})": a["id"] for a in connected_accounts}
+    labels = list(account_options.keys())
+    default_idx = 0
+    selected = st.session_state.get("selected_account_id")
+    if selected is not None:
+        for i, label in enumerate(labels):
+            if account_options[label] == selected:
+                default_idx = i
+                break
+
+    top_a, top_b, top_c, top_d, top_e, top_f = st.columns([2, 1.7, 1.2, 1.2, 0.8, 0.8])
     with top_a:
-        max_results = st.number_input("Emails to fetch", min_value=1, max_value=100, value=10, step=1)
+        selected_label = st.selectbox("Email account", options=labels, index=default_idx)
+        st.session_state.selected_account_id = account_options[selected_label]
     with top_b:
-        done_suggest_threshold = st.slider("Done confidence", 0.2, 0.9, 0.4, 0.05)
+        duration_label = st.selectbox("Fetch window", options=list(DURATION_OPTIONS.keys()), index=1)
     with top_c:
+        done_suggest_threshold = st.slider("Done confidence", 0.2, 0.9, 0.4, 0.05)
+    with top_d:
         if st.button("Fetch + Analyze", use_container_width=True):
             try:
                 with st.spinner("Fetching emails from Gmail..."):
-                    messages = fetch_emails(int(max_results))
+                    account = get_active_account(user["id"], st.session_state.selected_account_id)
+                    if not account:
+                        st.error("Selected account is not active. Reconnect from Account Setup.")
+                        st.stop()
+                    fetch_connected = getattr(gmail_ingest, "fetch_emails_for_account", None)
+                    if fetch_connected is not None:
+                        messages, refreshed = fetch_connected(
+                            account=account,
+                            max_results=FETCH_LIMIT,
+                            query=DEFAULT_GMAIL_QUERY_FILTER,
+                        )
+                    else:
+                        # Backward-compat path if an old gmail_ingest module is loaded.
+                        legacy_fetch = getattr(gmail_ingest, "fetch_emails", None)
+                        if legacy_fetch is None:
+                            raise RuntimeError(
+                                "gmail_ingest does not expose fetch_emails_for_account or fetch_emails. Restart Streamlit."
+                            )
+                        messages = legacy_fetch(FETCH_LIMIT)
+                        refreshed = account
+                    messages = _filter_messages_by_duration(messages, DURATION_OPTIONS[duration_label])
+                    update_account_tokens(
+                        user_id=user["id"],
+                        account_id=account["id"],
+                        access_token=refreshed.get("access_token", account.get("access_token", "")),
+                        refresh_token=refreshed.get("refresh_token", account.get("refresh_token", "")),
+                        token_expiry=refreshed.get("token_expiry", account.get("token_expiry", "")),
+                    )
+                    update_account_fetch_success(user["id"], account["id"])
                     st.session_state.latest_messages = messages
                 with st.spinner("Analyzing tasks with LLM..."):
-                    st.session_state.results = analyze_messages(messages, st.session_state.prefs, st.session_state.memory)
+                    user_events = load_events(limit=1000, user_id=user["id"])
+                    global_events = load_events_all_users(limit=5000, exclude_user_id=user["id"])
+                    user_hint_profile = derive_user_hint_profile(
+                        user_events,
+                        account_id=st.session_state.selected_account_id,
+                    )
+                    global_hint_profile = derive_user_hint_profile(
+                        global_events,
+                        account_id=st.session_state.selected_account_id,
+                        min_action_count=5,
+                        min_noise_count=5,
+                        min_noise_domain_count=8,
+                    )
+                    hint_profile = merge_hint_profiles(user_hint_profile, global_hint_profile)
+                    st.session_state.results = analyze_messages(
+                        messages,
+                        st.session_state.prefs,
+                        st.session_state.memory,
+                        hint_profile=hint_profile,
+                    )
                     st.session_state.done_suggestions = detect_done_suggestions(
                         st.session_state.results,
                         messages,
                         suggest_threshold=done_suggest_threshold,
+                        user_id=user["id"],
                     )
-                st.success(f"Loaded {len(st.session_state.results)} task(s).")
+                st.success(f"Loaded {len(st.session_state.results)} task(s) from {duration_label.lower()}.")
             except Exception as e:
+                account_id = st.session_state.get("selected_account_id")
+                if account_id is not None:
+                    update_account_health(user["id"], int(account_id), status="error", error_msg=str(e))
                 st.error(f"Fetch/analyze failed: {e}")
-    with top_d:
+    with top_e:
         if st.button("+", use_container_width=True, help="Add new task"):
             st.session_state.show_add_task = not st.session_state.show_add_task
-    with top_e:
+    with top_f:
         if st.button("↶", use_container_width=True, help="Undo last action"):
             if undo_last_action():
                 st.success("Undid last action.")
@@ -98,7 +216,17 @@ def render_task_board():
                             "updated_at": datetime.now().isoformat(),
                         }
                     )
-                    append_event("task_created_manual", next_id, new_task_text.strip(), {"bucket": new_bucket})
+                    append_event(
+                        "task_created_manual",
+                        next_id,
+                        new_task_text.strip(),
+                        {
+                            "bucket": new_bucket,
+                            "account_id": st.session_state.get("selected_account_id"),
+                            "source": "manual",
+                        },
+                        user_id=user["id"],
+                    )
                     st.success("Task added.")
                     st.session_state.show_add_task = False
                     st.rerun()
@@ -172,7 +300,7 @@ def render_task_board():
             target["bucket"] = new_bucket
             target["manual_override"] = new_bucket != target.get("predicted_bucket", new_bucket)
             target["updated_at"] = datetime.now().isoformat()
-            append_event("bucket_changed", target["id"], target["task"], {"to_bucket": new_bucket})
+            append_event("bucket_changed", target["id"], target["task"], {"to_bucket": new_bucket}, user_id=user["id"])
             bucket_or_order_changed = True
 
         new_order = int(edited["order"])
@@ -181,7 +309,7 @@ def render_task_board():
                 push_undo_snapshot()
             target["manual_rank"] = new_order
             target["updated_at"] = datetime.now().isoformat()
-            append_event("order_changed", target["id"], target["task"], {"new_order": new_order})
+            append_event("order_changed", target["id"], target["task"], {"new_order": new_order}, user_id=user["id"])
             bucket_or_order_changed = True
 
         if bool(edited["✓"]):
@@ -215,6 +343,7 @@ def render_task_board():
                     "reason": suggestion.get("reason", ""),
                     "evidence": suggestion.get("evidence", ""),
                 },
+                user_id=user["id"],
             )
         st.success(f"Marked {len(done_ids)} task(s) done.")
         st.rerun()
@@ -228,7 +357,7 @@ def render_task_board():
             try:
                 target["reason"] = [generate_reasoning(target["task"])]
                 target["updated_at"] = datetime.now().isoformat()
-                append_event("reason_generated", target["id"], target["task"], {})
+                append_event("reason_generated", target["id"], target["task"], {}, user_id=user["id"])
             except Exception:
                 continue
         st.success(f"Generated reason for {len(reason_ids)} task(s).")
@@ -250,7 +379,18 @@ def render_task_board():
                         if target:
                             target["status"] = "deleted"
                             target["updated_at"] = datetime.now().isoformat()
-                            append_event("task_deleted", target["id"], target["task"], {})
+                            append_event(
+                                "task_deleted",
+                                target["id"],
+                                target["task"],
+                                {
+                                    "account_id": st.session_state.get("selected_account_id"),
+                                    "source": target.get("source", ""),
+                                    "sender": target.get("meta", {}).get("sender", ""),
+                                    "sender_domain": _sender_domain(target.get("meta", {}).get("sender", "")),
+                                },
+                                user_id=user["id"],
+                            )
                     st.session_state.pending_delete_ids = []
                     st.success("Task(s) deleted.")
                     st.rerun()
@@ -323,10 +463,10 @@ def render_task_board():
                                 except Exception:
                                     pass
                                 target["updated_at"] = datetime.now().isoformat()
-                                entry = append_memory_entry(target["task"], target["meta"], "clarification")
+                                entry = append_memory_entry(target["task"], target["meta"], "clarification", user_id=user["id"])
                                 if entry:
                                     st.session_state.memory.append(entry)
-                                append_event("clarifications_applied", target["id"], target["task"], {"fields": questions})
+                                append_event("clarifications_applied", target["id"], target["task"], {"fields": questions}, user_id=user["id"])
                                 st.session_state.signal_wizard_task_id = None
                                 st.session_state.signal_wizard_step = 0
                                 st.success("Signals updated, rescored, and reason generated.")
@@ -369,6 +509,6 @@ def render_task_board():
                         push_undo_snapshot()
                         r["status"] = "open"
                         r["updated_at"] = datetime.now().isoformat()
-                        append_event("task_reopened", r["id"], r["task"], {"bucket": r.get("bucket")})
+                        append_event("task_reopened", r["id"], r["task"], {"bucket": r.get("bucket")}, user_id=user["id"])
                         st.success(f"Task {r['id']} reopened.")
                         st.rerun()

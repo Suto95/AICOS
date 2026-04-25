@@ -1,0 +1,12 @@
+{
+  "outcome_value": {
+    "low": 0,
+    "medium": 1,
+    "high": 0
+  },
+  "strategic_alignment": {
+    "low": 1,
+    "medium": 0,
+    "high": 0
+  }
+}

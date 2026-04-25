@@ -48,5 +48,6 @@ print(dev_config.model)        # gpt-3.5-turbo
 print(prod_config.model)       # gpt-4
 print(prod_config.max_tokens)  # 1000
 
-
+import os
+print(os.getcwd())
 
