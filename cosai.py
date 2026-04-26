@@ -23,7 +23,7 @@ client = OpenAI(api_key=os.getenv("OAI_API_KEY"))
 # -----------------------------
 # 1. SAMPLE INPUT (replace later with Slack/Gmail)
 # -----------------------------
-from gmail_ingest import fetch_emails
+from aicos.cosai_app.gmail_ingest import fetch_emails
 
 messages = fetch_emails(10)
 

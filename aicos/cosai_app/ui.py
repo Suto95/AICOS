@@ -4,7 +4,7 @@ import re
 import pandas as pd
 import streamlit as st
 
-import gmail_ingest
+from . import gmail_ingest
 from .accounts import (
     DEFAULT_GMAIL_QUERY_FILTER,
     get_active_account,
