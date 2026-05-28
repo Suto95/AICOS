@@ -1,0 +1,1 @@
+-r aicos/cosai_app/requirements.txt
