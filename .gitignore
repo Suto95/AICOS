@@ -6,6 +6,8 @@ __pycache__/
 .vscode/
 .DS_Store
 gmailcred.json
+gmail_oauth_creds.json
+gmail_oauth_token.json
 token.pickle
 secrets.toml
-supbase_cred.txt
+supabase_cred.txt
