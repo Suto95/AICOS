@@ -5,6 +5,7 @@ __pycache__/
 *.db
 .vscode/
 .DS_Store
+.streamlit/secrets.toml
 gmailcred.json
 gmail_oauth_creds.json
 gmail_oauth_token.json

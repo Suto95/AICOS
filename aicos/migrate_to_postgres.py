@@ -21,11 +21,14 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 import json
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
 def get_sqlite_conn():
     sqlite_path = os.getenv("SQLITE_DB_PATH", "cosai_app.db")
+    if not os.path.isabs(sqlite_path):
+        sqlite_path = Path(__file__).resolve().parent / sqlite_path
     return sqlite3.connect(sqlite_path)
 
 

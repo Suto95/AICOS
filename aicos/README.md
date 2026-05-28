@@ -35,6 +35,7 @@ AICOS is a Streamlit-based AI task prioritization app that integrates with Gmail
    ```bash
    pip install psycopg2-binary
    ```
+   This package is required for production PostgreSQL support when deploying to Streamlit Cloud.
 
 2. **Set environment variables:**
    ```bash
