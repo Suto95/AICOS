@@ -1,1 +1,11 @@
--r aicos/cosai_app/requirements.txt
+streamlit==1.45.1
+streamlit-analytics==0.4.1
+pandas==2.3.3
+openai==1.77.0
+python-dotenv==1.1.0
+psycopg2-binary==2.9.10
+google-api-python-client==2.169.0
+google-auth==2.40.1
+google-auth-oauthlib==1.2.2
+cryptography==46.0.3
+sentry-sdk[streamlit]==1.40.0
