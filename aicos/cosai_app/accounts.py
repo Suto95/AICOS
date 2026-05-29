@@ -252,6 +252,41 @@ def _load_google_oauth_deps():
     return Flow
 
 
+def _redirect_uris():
+    raw = os.getenv("COSAI_REDIRECT_URI", "").strip()
+    if not raw:
+        return []
+    return [uri.strip() for uri in raw.split(",") if uri.strip()]
+
+
+def _selected_redirect_uri():
+    uris = _redirect_uris()
+    if not uris:
+        raise RuntimeError("Set COSAI_REDIRECT_URI for Google OAuth.")
+
+    base_url = os.getenv("STREAMLIT_SERVER_BASE_URL", "").strip()
+    if base_url:
+        for uri in uris:
+            if uri.rstrip("/") == base_url.rstrip("/"):
+                return uri
+
+    public_url = os.getenv("STREAMLIT_PUBLIC_URL", "").strip()
+    if public_url:
+        for uri in uris:
+            if uri.rstrip("/") == public_url.rstrip("/"):
+                return uri
+
+    if len(uris) == 1:
+        return uris[0]
+
+    # Fallback to the first URI if no exact match is found.
+    return uris[0]
+
+
+def get_redirect_uri():
+    return _selected_redirect_uri()
+
+
 def _google_client_config():
     client_id = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
@@ -266,17 +301,19 @@ def _google_client_config():
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
             "client_secret": client_secret,
-            "redirect_uris": [os.getenv("COSAI_REDIRECT_URI", "").strip()],
+            "redirect_uris": _redirect_uris(),
         }
     }
 
 
-def build_google_auth_url(redirect_uri):
+def build_google_auth_url(redirect_uri=None):
     Flow = _load_google_oauth_deps()
     state = secrets.token_urlsafe(24)
     # PKCE verifier must be reused in callback token exchange.
     code_verifier = secrets.token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(code_verifier.encode("utf-8")).digest()).decode("utf-8").rstrip("=")
+    if redirect_uri is None:
+        redirect_uri = _selected_redirect_uri()
     flow = Flow.from_client_config(
         _google_client_config(),
         scopes=GOOGLE_OAUTH_SCOPES,
@@ -292,8 +329,10 @@ def build_google_auth_url(redirect_uri):
     return auth_url, state, code_verifier
 
 
-def complete_google_oauth(code, state, redirect_uri, code_verifier=None):
+def complete_google_oauth(code, state, redirect_uri=None, code_verifier=None):
     Flow = _load_google_oauth_deps()
+    if redirect_uri is None:
+        redirect_uri = _selected_redirect_uri()
     flow = Flow.from_client_config(
         _google_client_config(),
         scopes=GOOGLE_OAUTH_SCOPES,

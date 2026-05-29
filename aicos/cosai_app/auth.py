@@ -8,6 +8,7 @@ from .accounts import (
     cache_oauth_verifier,
     complete_google_oauth,
     ensure_login_email_account,
+    get_redirect_uri,
     pop_oauth_verifier,
     upsert_google_account,
 )
@@ -49,7 +50,7 @@ def require_login():
     if current_user():
         return True
 
-    redirect_uri = os.getenv("COSAI_REDIRECT_URI", "").strip()
+    redirect_uri = get_redirect_uri()
     code = st.session_state.get("pending_oauth_code")
     returned_state = st.session_state.get("pending_oauth_state")
     expected_state = st.session_state.get("oauth_state")

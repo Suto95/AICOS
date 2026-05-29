@@ -73,7 +73,7 @@ def normalize_task(task):
         return {}
 
     normalized = task.copy()
-    for key in SIGNAL_FIELDS:
+    for key in tuple(SIGNAL_FIELDS) + ("urgency_signal", "importance_signal"):
         value = normalized.get(key)
         if isinstance(value, str):
             value = value.strip().lower()
@@ -490,6 +490,14 @@ def compute_features(task, prefs):
     importance = (
         outcome_w * outcome + strategic_w * strategic + 0.20 * visibility + 0.15 * (1 - reversibility)
     )
+
+    urgency_signal = IMPORTANCE_MAP.get(task.get("urgency_signal"))
+    importance_signal = IMPORTANCE_MAP.get(task.get("importance_signal"))
+
+    if urgency_signal is not None:
+        urgency = 0.8 * urgency + 0.2 * urgency_signal
+    if importance_signal is not None:
+        importance = 0.8 * importance + 0.2 * importance_signal
 
     return urgency, importance
 

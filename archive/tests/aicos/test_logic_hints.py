@@ -2,9 +2,11 @@ import unittest
 
 from cosai_app.logic import (
     build_compact_message_context,
+    compute_features,
     derive_user_hint_profile,
     is_task_like_message,
     merge_hint_profiles,
+    normalize_task,
 )
 
 
@@ -53,6 +55,36 @@ class TestHintLearning(unittest.TestCase):
         body_line = [line for line in compact.splitlines() if line.startswith("Body: ")]
         self.assertTrue(body_line)
         self.assertLessEqual(len(body_line[0]) - len("Body: "), 120)
+
+    def test_normalize_task_lowercases_external_signals(self):
+        task = {
+            "deadline": "2026-12-01",
+            "urgency_signal": "High",
+            "importance_signal": "MEDIUM",
+        }
+        normalized = normalize_task(task)
+        self.assertEqual(normalized["urgency_signal"], "high")
+        self.assertEqual(normalized["importance_signal"], "medium")
+
+    def test_compute_features_applies_signal_overrides(self):
+        task_without_signal = {
+            "deadline": "2026-12-01",
+            "penalty_for_delay": "no",
+            "blocks_others": "no",
+            "outcome_value": "medium",
+            "strategic_alignment": "medium",
+            "reversibility": "medium",
+            "visibility": "medium",
+        }
+        task_with_signal = task_without_signal.copy()
+        task_with_signal["urgency_signal"] = "high"
+        task_with_signal["importance_signal"] = "high"
+
+        urgency_base, importance_base = compute_features(task_without_signal, prefs={})
+        urgency_signal, importance_signal = compute_features(task_with_signal, prefs={})
+
+        self.assertGreater(urgency_signal, urgency_base)
+        self.assertGreater(importance_signal, importance_base)
 
 
 if __name__ == "__main__":

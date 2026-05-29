@@ -36,8 +36,8 @@ if require_login():
     c1, c2 = st.columns(2)
     with c1:
         st.markdown("### Pages")
-        st.markdown("- `Account Setup`: connect and configure email accounts")
         st.markdown("- `Task Board`: primary table-first workflow")
+        st.markdown("- `Account Setup`: connect and configure email accounts")
         st.markdown("- `System Insights`: memory, events, and state diagnostics")
     with c2:
         st.markdown("### Session")

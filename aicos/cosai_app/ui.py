@@ -79,15 +79,11 @@ def render_task_board(user):
     st.title("AICOS Prioritizer")
 
     connected_accounts = [a for a in list_connected_accounts(user["id"]) if a.get("status") == "active"]
-    if not connected_accounts:
-        st.warning("No active email account connected. Open `Account Setup` to connect Gmail.")
-        return
-
     account_options = {f"{a.get('account_email') or 'Gmail'} (id {a['id']})": a["id"] for a in connected_accounts}
     labels = list(account_options.keys())
     default_idx = 0
     selected = st.session_state.get("selected_account_id")
-    if selected is not None:
+    if selected is not None and selected in account_options.values():
         for i, label in enumerate(labels):
             if account_options[label] == selected:
                 default_idx = i
@@ -95,14 +91,18 @@ def render_task_board(user):
 
     top_a, top_b, top_c, top_d, top_e, top_f = st.columns([2, 1.7, 1.2, 1.2, 0.8, 0.8])
     with top_a:
-        selected_label = st.selectbox("Email account", options=labels, index=default_idx)
-        st.session_state.selected_account_id = account_options[selected_label]
+        if connected_accounts:
+            selected_label = st.selectbox("Email account", options=labels, index=default_idx)
+            st.session_state.selected_account_id = account_options[selected_label]
+        else:
+            selected_label = None
+            st.info("No active email account connected. Open Account Setup to connect Gmail.")
     with top_b:
         duration_label = st.selectbox("Fetch window", options=list(DURATION_OPTIONS.keys()), index=1)
     with top_c:
-        done_suggest_threshold = st.slider("Done confidence", 0.2, 0.9, 0.4, 0.05)
+        done_suggest_threshold = st.slider("Done confidence", 0.2, 0.9, 0.6, 0.05)
     with top_d:
-        if st.button("Fetch + Analyze", use_container_width=True):
+        if st.button("Fetch + Analyze", use_container_width=True, disabled=not connected_accounts):
             try:
                 with st.spinner("Fetching emails from Gmail..."):
                     account = get_active_account(user["id"], st.session_state.selected_account_id)
@@ -169,7 +169,7 @@ def render_task_board(user):
                     update_account_health(user["id"], int(account_id), status="error", error_msg=str(e))
                 st.error(f"Fetch/analyze failed: {e}")
     with top_e:
-        if st.button("+", use_container_width=True, help="Add new task"):
+        if st.button("➕ Add task", use_container_width=True, help="Add new task"):
             st.session_state.show_add_task = not st.session_state.show_add_task
     with top_f:
         if st.button("↶", use_container_width=True, help="Undo last action"):
@@ -181,8 +181,18 @@ def render_task_board(user):
 
     results = st.session_state.results
     if not results:
-        st.info("No tasks loaded yet. Click `Fetch + Analyze` above.")
-        return
+        st.info("No tasks loaded yet. Click `Fetch + Analyze` above or add a manual task with the + button.")
+        st.markdown("If you're new, start with Account Setup.")
+        if st.button("Open Account Setup", use_container_width=True, key="open_account_setup"):
+            st.experimental_set_query_params(page="Account Setup")
+            st.experimental_rerun()
+
+    if not connected_accounts:
+        st.markdown("---")
+        st.info("No active email account connected. Add Gmail in Account Setup or add tasks manually.")
+        st.markdown("---")
+        if not results:
+            return
 
     if st.session_state.show_add_task:
         with st.container(border=True):
@@ -255,6 +265,7 @@ def render_task_board(user):
                 "done?": hint,
                 "Add signals": False,
                 "Reason?": False,
+                "Reason": "; ".join(r.get("reason", [])) if r.get("reason") else "",
                 "✓": False,
                 "🗑": False,
             }
@@ -273,6 +284,7 @@ def render_task_board(user):
             "done?": st.column_config.TextColumn("done?", disabled=True, help="Potential done suggestion available."),
             "Add signals": st.column_config.CheckboxColumn("Add signals"),
             "Reason?": st.column_config.CheckboxColumn("Reason?"),
+            "Reason": st.column_config.TextColumn("Reason", disabled=True, width="large"),
             "✓": st.column_config.CheckboxColumn("✓"),
             "🗑": st.column_config.CheckboxColumn("🗑"),
         },
