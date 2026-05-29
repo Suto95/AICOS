@@ -1,11 +1,20 @@
 import os
 import sqlite3
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
 
 DB_PATH = Path(__file__).resolve().parent.parent / "cosai_app.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+
+
+def _has_psycopg2():
+    try:
+        import psycopg2  # noqa: F401
+        return True
+    except ImportError:
+        return False
 
 
 class PostgresConnection:
@@ -65,7 +74,14 @@ class PostgresConnection:
 
 
 def _use_postgres():
-    return bool(DATABASE_URL)
+    if not DATABASE_URL:
+        return False
+    if not _has_psycopg2():
+        warnings.warn(
+            "DATABASE_URL is set but psycopg2 is not installed; falling back to SQLite. "
+            "Restore psycopg2-binary for Supabase/Postgres support.")
+        return False
+    return True
 
 
 def get_sqlite_conn():
