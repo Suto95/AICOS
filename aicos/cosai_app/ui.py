@@ -76,7 +76,40 @@ def render_task_board(user):
     except TypeError:
         init_state()
 
-    st.title("AICOS Prioritizer")
+    st.markdown(
+        """
+        <style>
+            .task-board-header {
+                background: linear-gradient(135deg, rgba(79,70,229,0.18), rgba(14,165,233,0.10));
+                border: 1px solid rgba(148,163,184,0.18);
+                border-radius: 20px;
+                padding: 1.4rem 1.5rem;
+                margin-bottom: 1rem;
+            }
+            .task-board-subtitle {
+                color: #CBD5E1;
+                font-size: 0.98rem;
+                margin-top: 0.4rem;
+            }
+            [data-testid="stDataFrame"] {
+                border-radius: 16px;
+                overflow: hidden;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="task-board-header">
+            <div style="font-size:0.8rem; letter-spacing:0.12em; text-transform:uppercase; color:#A5B4FC; font-weight:700;">Priority workspace</div>
+            <h1 style="margin:0.25rem 0; color:#F8FAFC;">AICOS Prioritizer</h1>
+            <div class="task-board-subtitle">Turn Gmail signals into clear, actionable work.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     connected_accounts = [a for a in list_connected_accounts(user["id"]) if a.get("status") == "active"]
     account_options = {f"{a.get('account_email') or 'Gmail'} (id {a['id']})": a["id"] for a in connected_accounts}

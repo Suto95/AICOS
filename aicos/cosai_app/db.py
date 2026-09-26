@@ -81,7 +81,19 @@ def _use_postgres():
             "DATABASE_URL is set but psycopg2 is not installed; falling back to SQLite. "
             "Restore psycopg2-binary for Supabase/Postgres support.")
         return False
-    return True
+
+    try:
+        import psycopg2
+
+        with psycopg2.connect(DATABASE_URL, connect_timeout=3) as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception as exc:
+        warnings.warn(
+            f"PostgreSQL connection failed at startup; falling back to SQLite. "
+            f"Reason: {exc}"
+        )
+        return False
 
 
 def get_sqlite_conn():

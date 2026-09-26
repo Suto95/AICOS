@@ -264,6 +264,16 @@ def _selected_redirect_uri():
     if not uris:
         raise RuntimeError("Set COSAI_REDIRECT_URI for Google OAuth.")
 
+    local_port = (os.getenv("STREAMLIT_SERVER_PORT", "") or os.getenv("PORT", "")).strip()
+    if local_port:
+        port_matches = {
+            f"http://localhost:{local_port}/".rstrip("/"),
+            f"http://127.0.0.1:{local_port}/".rstrip("/"),
+        }
+        for uri in uris:
+            if uri.rstrip("/") in port_matches:
+                return uri
+
     base_url = os.getenv("STREAMLIT_SERVER_BASE_URL", "").strip()
     if base_url:
         for uri in uris:
@@ -275,6 +285,11 @@ def _selected_redirect_uri():
         for uri in uris:
             if uri.rstrip("/") == public_url.rstrip("/"):
                 return uri
+
+    # Prefer localhost redirect URIs in local development when multiple options are configured.
+    localhost_uris = [uri for uri in uris if "localhost" in uri or "127.0.0.1" in uri]
+    if localhost_uris:
+        return localhost_uris[0]
 
     if len(uris) == 1:
         return uris[0]
