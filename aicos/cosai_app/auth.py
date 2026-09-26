@@ -13,6 +13,7 @@ from .accounts import (
     upsert_google_account,
 )
 from .db import get_conn, init_db
+from .theme import apply_theme
 
 
 def _allowed_emails():
@@ -50,6 +51,7 @@ def require_login():
     if current_user():
         return True
 
+    apply_theme()
     redirect_uri = get_redirect_uri()
     code = st.session_state.get("pending_oauth_code")
     returned_state = st.session_state.get("pending_oauth_state")

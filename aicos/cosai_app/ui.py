@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 
 from . import gmail_ingest
+from .theme import apply_theme
 from .accounts import (
     DEFAULT_GMAIL_QUERY_FILTER,
     get_active_account,
@@ -71,34 +72,11 @@ def _sender_domain(sender):
 
 
 def render_task_board(user):
+    apply_theme()
     try:
         init_state(user_id=user["id"])
     except TypeError:
         init_state()
-
-    st.markdown(
-        """
-        <style>
-            .task-board-header {
-                background: linear-gradient(135deg, rgba(79,70,229,0.18), rgba(14,165,233,0.10));
-                border: 1px solid rgba(148,163,184,0.18);
-                border-radius: 20px;
-                padding: 1.4rem 1.5rem;
-                margin-bottom: 1rem;
-            }
-            .task-board-subtitle {
-                color: #CBD5E1;
-                font-size: 0.98rem;
-                margin-top: 0.4rem;
-            }
-            [data-testid="stDataFrame"] {
-                border-radius: 16px;
-                overflow: hidden;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
     st.markdown(
         """
@@ -121,6 +99,34 @@ def render_task_board(user):
             if account_options[label] == selected:
                 default_idx = i
                 break
+
+    open_tasks = sum(1 for r in st.session_state.results if r.get("status", "open") == "open")
+    high_priority = sum(1 for r in st.session_state.results if r.get("status", "open") == "open" and float(r.get("score", 0) or 0) >= 0.75)
+    recent_memory = len(st.session_state.memory)
+
+    st.markdown(
+        f"""
+        <div class="task-board-kpi-grid">
+            <div style="background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.18); border-radius:18px; padding:0.9rem 1rem;">
+                <div style="color:#A5B4FC; font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; font-weight:700;">Open tasks</div>
+                <div style="font-size:2rem; font-weight:700; margin-top:0.35rem; color:#F8FAFC;">{open_tasks}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.18); border-radius:18px; padding:0.9rem 1rem;">
+                <div style="color:#A5B4FC; font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; font-weight:700;">High priority</div>
+                <div style="font-size:2rem; font-weight:700; margin-top:0.35rem; color:#F8FAFC;">{high_priority}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.18); border-radius:18px; padding:0.9rem 1rem;">
+                <div style="color:#A5B4FC; font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; font-weight:700;">Memory</div>
+                <div style="font-size:2rem; font-weight:700; margin-top:0.35rem; color:#F8FAFC;">{recent_memory}</div>
+            </div>
+            <div style="background:rgba(15,23,42,0.72); border:1px solid rgba(148,163,184,0.18); border-radius:18px; padding:0.9rem 1rem;">
+                <div style="color:#A5B4FC; font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase; font-weight:700;">Accounts</div>
+                <div style="font-size:2rem; font-weight:700; margin-top:0.35rem; color:#F8FAFC;">{len(connected_accounts)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     top_a, top_b, top_c, top_d, top_e, top_f = st.columns([2, 1.7, 1.2, 1.2, 0.8, 0.8])
     with top_a:
@@ -304,7 +310,17 @@ def render_task_board(user):
             }
         )
 
-    st.subheader("Prioritized Tasks")
+    st.markdown(
+        """
+        <div style="background:linear-gradient(135deg, rgba(99,102,241,0.12), rgba(14,165,233,0.08)); border:1px solid rgba(148,163,184,0.18); border-radius:18px; padding:0.9rem 1rem; margin:1.1rem 0 0.6rem;">
+            <div style="font-size:0.72rem; letter-spacing:0.12em; text-transform:uppercase; color:#A5B4FC; font-weight:700;">Priority queue</div>
+            <div style="color:#F8FAFC; font-size:1.2rem; font-weight:700; margin-top:0.2rem;">Prioritized Tasks</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.caption("Filter, triage, and refine your highest-value work in one place.")
     editor_df = st.data_editor(
         pd.DataFrame(table_rows),
         hide_index=True,

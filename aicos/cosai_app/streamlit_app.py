@@ -9,6 +9,7 @@ import streamlit as st
 
 from cosai_app.auth import current_user, render_user_badge, require_login
 from cosai_app.state import init_state
+from cosai_app.theme import apply_theme
 
 # Initialize analytics (only in production)
 try:
@@ -20,48 +21,7 @@ except ImportError:
     pass  # Analytics not installed
 
 st.set_page_config(page_title="AICOS", page_icon="⚡", layout="wide")
-
-st.markdown(
-    """
-    <style>
-        .block-container {
-            padding-top: 2rem;
-            padding-bottom: 3rem;
-            max-width: 1400px;
-        }
-        [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0f172a 0%, #111827 100%);
-        }
-        .stMetric {
-            background: rgba(17, 24, 39, 0.75);
-            border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 16px;
-            padding: 0.75rem 1rem;
-        }
-        [data-testid="stMetricValue"] {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-        div[data-testid="stVerticalBlock"] > div {
-            border-radius: 18px;
-        }
-        .app-hero {
-            background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(16,185,129,0.08));
-            border: 1px solid rgba(148,163,184,0.16);
-            border-radius: 22px;
-            padding: 1.4rem 1.5rem;
-            margin-bottom: 1rem;
-        }
-        .section-card {
-            background: rgba(15, 23, 42, 0.70);
-            border: 1px solid rgba(148, 163, 184, 0.18);
-            border-radius: 18px;
-            padding: 1.2rem;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+apply_theme()
 
 if require_login():
     user = current_user()
@@ -77,8 +37,8 @@ if require_login():
         <div class="app-hero">
             <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:1rem; flex-wrap:wrap;">
                 <div>
-                    <div style="font-size:0.8rem; letter-spacing:0.12em; text-transform:uppercase; color:#A5B4FC; font-weight:700;">AI Task OS</div>
-                    <h1 style="margin:0.25rem 0; color:#F8FAFC;">AICOS</h1>
+                    <div class="eyebrow">AI Task OS</div>
+                    <h1 style="margin:0.3rem 0 0; color:#F8FAFC; font-size:2.4rem; line-height:1.1;">AICOS</h1>
                 </div>
                 <div style="color:#CBD5E1; font-size:0.95rem;">Multipage workflow · email-aware prioritization</div>
             </div>
@@ -97,17 +57,23 @@ if require_login():
 
     c1, c2 = st.columns(2)
     with c1:
-        with st.container(border=True):
+        with st.container():
+            st.markdown('<div class="workspace-card">', unsafe_allow_html=True)
             st.markdown("### Workspace")
             st.markdown("- **Task Board**: intake, prioritize, and resolve email-derived work")
             st.markdown("- **Account Setup**: connect Gmail and manage account health")
             st.markdown("- **System Insights**: memory, events, and learning diagnostics")
+            st.markdown("</div>", unsafe_allow_html=True)
     with c2:
-        with st.container(border=True):
+        with st.container():
+            st.markdown('<div class="feature-card">', unsafe_allow_html=True)
             st.markdown("### Quick start")
             st.info("Start with Account Setup, then open Task Board to fetch and prioritize your inbox.")
+            st.markdown('<div class="primary-btn">', unsafe_allow_html=True)
             st.button("Open Task Board", key="home_open_board", use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
             if st.session_state.get("home_open_board"):
                 st.switch_page("pages/0_Task_Board.py")
+            st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
