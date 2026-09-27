@@ -1,6 +1,6 @@
 # AICOS Bucket Simulation Summary
 
-- Generated at: `2026-04-25T09:42:27.134713`
+- Generated at: `2026-05-29T21:47:56.160291`
 - Mode: `mock_extract`
 - Fixtures: `tests/fixtures/aicos_bucket_sim_fixtures.json`
 - Status: **PASS**

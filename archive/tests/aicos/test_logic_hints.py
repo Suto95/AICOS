@@ -4,6 +4,8 @@ from cosai_app.logic import (
     build_compact_message_context,
     compute_features,
     derive_user_hint_profile,
+    has_completion_keywords,
+    is_reply_message,
     is_task_like_message,
     merge_hint_profiles,
     normalize_task,
@@ -85,6 +87,22 @@ class TestHintLearning(unittest.TestCase):
 
         self.assertGreater(urgency_signal, urgency_base)
         self.assertGreater(importance_signal, importance_base)
+
+    def test_completion_keyword_detection(self):
+        self.assertTrue(has_completion_keywords("All set, this has been deployed."))
+        self.assertFalse(has_completion_keywords("Can you review this when ready?"))
+
+    def test_reply_message_detection_from_subject_and_quoted_body(self):
+        self.assertTrue(is_reply_message({"subject": "Re: Contract review", "body": ""}))
+        self.assertTrue(
+            is_reply_message(
+                {
+                    "subject": "Contract review",
+                    "body": "Thanks, completed.\n\n-----Original Message-----\nPlease review",
+                }
+            )
+        )
+        self.assertFalse(is_reply_message({"subject": "Contract review", "body": "Please review this."}))
 
 
 if __name__ == "__main__":

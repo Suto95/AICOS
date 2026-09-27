@@ -655,17 +655,62 @@ def dedupe_results(results):
 
 
 # ---------- done suggestions ----------
+def has_completion_keywords(message_text):
+    """Check if message contains common completion signals."""
+    completion_keywords = [
+        r"\bdone\b",
+        r"\bcompleted?\b",
+        r"\bfinished\b",
+        r"\bclosed\b",
+        r"\bresolved\b",
+        r"\bfixed\b",
+        r"\bwrapped\s+up\b",
+        r"\ball\s+set\b",
+        r"\b(it'?s|this is|that is|we are|we're)\s+ready\b",
+        r"\bdeployed\b",
+        r"\blaunched\b",
+    ]
+    text_lower = message_text.lower()
+    for pattern in completion_keywords:
+        if re.search(pattern, text_lower):
+            return True
+    return False
+
+
+def is_reply_message(message):
+    """Detect if message is a reply (in thread, not original)."""
+    subject = (message.get("subject") or "").lower().strip()
+    is_reply_subject = subject.startswith(("re:", "fw:", "fwd:"))
+
+    body = (message.get("body") or "").strip()
+    first_lines = body.splitlines()[:5]
+    has_quoted = any(
+        line.lstrip().startswith(">")
+        or "---" in line
+        or "original message" in line.lower()
+        for line in first_lines
+    )
+
+    return is_reply_subject or has_quoted
+
+
 def retrieve_done_candidates(open_tasks, message, top_k=6, min_score=0.08):
     msg_text = get_message_text_for_done(message)
     msg_sender = message.get("sender", "")
     scored = []
+
+    keyword_boost = 0.25 if has_completion_keywords(msg_text) else 0.0
+    is_reply = is_reply_message(message)
+    effective_min_score = 0.05 if is_reply else min_score
 
     for task in open_tasks:
         score = text_similarity(task.get("task", ""), msg_text)
         task_sender = task.get("meta", {}).get("sender", "")
         if task_sender and msg_sender and task_sender == msg_sender:
             score += 0.15
-        if score >= min_score:
+        score += keyword_boost
+
+        if score >= effective_min_score:
             scored.append((score, task))
 
     scored.sort(key=lambda x: x[0], reverse=True)

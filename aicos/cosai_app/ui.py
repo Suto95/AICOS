@@ -21,6 +21,7 @@ from .logic import (
     derive_user_hint_profile,
     detect_done_suggestions,
     generate_reasoning,
+    is_near_duplicate_task,
     merge_hint_profiles,
     score_task,
     select_questions,
@@ -69,6 +70,32 @@ def _sender_domain(sender):
     if "@" not in email:
         return ""
     return email.split("@", 1)[1]
+
+
+def _is_duplicate_import(existing_task, new_task):
+    existing_meta = existing_task.get("meta", {})
+    new_meta = new_task.get("meta", {})
+    existing_thread = existing_meta.get("thread_id", "")
+    new_thread = new_meta.get("thread_id", "")
+    same_thread = bool(existing_thread and new_thread and existing_thread == new_thread)
+    return same_thread or is_near_duplicate_task(existing_task, new_task)
+
+
+def merge_new_results(existing_results, new_results):
+    merged = list(existing_results or [])
+    next_id = max((r.get("id", -1) for r in merged), default=-1) + 1
+    added_count = 0
+
+    for result in new_results or []:
+        if any(_is_duplicate_import(existing, result) for existing in merged):
+            continue
+        result = result.copy()
+        result["id"] = next_id
+        next_id += 1
+        added_count += 1
+        merged.append(result)
+
+    return merged, added_count
 
 
 def render_task_board(user):
@@ -189,11 +216,15 @@ def render_task_board(user):
                         min_noise_domain_count=8,
                     )
                     hint_profile = merge_hint_profiles(user_hint_profile, global_hint_profile)
-                    st.session_state.results = analyze_messages(
+                    new_results = analyze_messages(
                         messages,
                         st.session_state.prefs,
                         st.session_state.memory,
                         hint_profile=hint_profile,
+                    )
+                    st.session_state.results, added_count = merge_new_results(
+                        st.session_state.results,
+                        new_results,
                     )
                     st.session_state.done_suggestions = detect_done_suggestions(
                         st.session_state.results,
@@ -201,7 +232,10 @@ def render_task_board(user):
                         suggest_threshold=done_suggest_threshold,
                         user_id=user["id"],
                     )
-                st.success(f"Loaded {len(st.session_state.results)} task(s) from {duration_label.lower()}.")
+                st.success(
+                    f"Added {added_count} new task(s) from {duration_label.lower()}. "
+                    f"Total tasks: {len(st.session_state.results)}."
+                )
             except Exception as e:
                 account_id = st.session_state.get("selected_account_id")
                 if account_id is not None:

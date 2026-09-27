@@ -1,11 +1,13 @@
 import pandas as pd
 import streamlit as st
 
+from .theme import apply_theme
 from .data import load_events
 from .state import init_state
 
 
 def render_insights_page(user):
+    apply_theme()
     try:
         init_state(user_id=user["id"])
     except TypeError:

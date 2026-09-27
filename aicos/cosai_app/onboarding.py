@@ -2,6 +2,7 @@ import os
 
 import streamlit as st
 
+from .theme import apply_theme
 from .accounts import (
     build_google_auth_url,
     cache_oauth_verifier,
@@ -17,6 +18,7 @@ from .data import migrate_local_data_to_user
 
 
 def render_account_setup(user):
+    apply_theme()
     st.title("Account Setup")
     st.caption("Connect and manage email accounts for task ingestion.")
     ensure_login_email_account(user["id"], user.get("email", ""))
