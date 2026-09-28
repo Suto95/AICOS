@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 import re
 
-import pandas as pd
 import streamlit as st
 
 from . import gmail_ingest
@@ -15,16 +14,13 @@ from .accounts import (
     update_account_tokens,
 )
 from .config import BUCKET_ORDER
-from .data import append_event, append_memory_entry, load_events, load_events_all_users
+from .data import append_event, load_events, load_events_all_users
 from .logic import (
     analyze_messages,
     derive_user_hint_profile,
-    detect_done_suggestions,
-    generate_reasoning,
     is_near_duplicate_task,
     merge_hint_profiles,
     score_task,
-    select_questions,
 )
 from .state import init_state, push_undo_snapshot, undo_last_action
 
@@ -81,10 +77,39 @@ def _is_duplicate_import(existing_task, new_task):
     return same_thread or is_near_duplicate_task(existing_task, new_task)
 
 
+def task_snapshot(task):
+    snapshot = {
+        "id": task.get("id"),
+        "task": task.get("task", ""),
+        "score": task.get("score", 0),
+        "bucket": task.get("bucket", ""),
+        "predicted_bucket": task.get("predicted_bucket", task.get("bucket", "")),
+        "reason": task.get("reason", []),
+        "meta": task.get("meta", {}),
+        "inferred": task.get("inferred", {}),
+        "status": task.get("status", "open"),
+        "manual_override": task.get("manual_override", False),
+        "override_comment": task.get("override_comment", ""),
+        "source": task.get("source", ""),
+        "created_at": task.get("created_at", ""),
+        "updated_at": task.get("updated_at", ""),
+    }
+    if task.get("manual_rank") is not None:
+        snapshot["manual_rank"] = task.get("manual_rank")
+    return snapshot
+
+
+def task_event_payload(task, extra=None):
+    payload = dict(extra or {})
+    payload["task_snapshot"] = task_snapshot(task)
+    return payload
+
+
 def merge_new_results(existing_results, new_results):
     merged = list(existing_results or [])
     next_id = max((r.get("id", -1) for r in merged), default=-1) + 1
     added_count = 0
+    added_results = []
 
     for result in new_results or []:
         if any(_is_duplicate_import(existing, result) for existing in merged):
@@ -93,9 +118,10 @@ def merge_new_results(existing_results, new_results):
         result["id"] = next_id
         next_id += 1
         added_count += 1
+        added_results.append(result)
         merged.append(result)
 
-    return merged, added_count
+    return merged, added_count, added_results
 
 
 def render_task_board(user):
@@ -116,7 +142,9 @@ def render_task_board(user):
         unsafe_allow_html=True,
     )
 
-    connected_accounts = [a for a in list_connected_accounts(user["id"]) if a.get("status") == "active"]
+    accounts = list_connected_accounts(user["id"])
+    has_account_setup = bool(accounts)
+    connected_accounts = [a for a in accounts if a.get("status") == "active"]
     account_options = {f"{a.get('account_email') or 'Gmail'} (id {a['id']})": a["id"] for a in connected_accounts}
     labels = list(account_options.keys())
     default_idx = 0
@@ -155,7 +183,7 @@ def render_task_board(user):
         unsafe_allow_html=True,
     )
 
-    top_a, top_b, top_c, top_d, top_e, top_f = st.columns([2, 1.7, 1.2, 1.2, 0.8, 0.8])
+    top_a, top_b, top_c, top_d, top_e = st.columns([2.2, 1.8, 1.2, 0.9, 0.9])
     with top_a:
         if connected_accounts:
             selected_label = st.selectbox("Email account", options=labels, index=default_idx)
@@ -166,8 +194,6 @@ def render_task_board(user):
     with top_b:
         duration_label = st.selectbox("Fetch window", options=list(DURATION_OPTIONS.keys()), index=1)
     with top_c:
-        done_suggest_threshold = st.slider("Done confidence", 0.2, 0.9, 0.6, 0.05)
-    with top_d:
         if st.button("Fetch + Analyze", use_container_width=True, disabled=not connected_accounts):
             try:
                 with st.spinner("Fetching emails from Gmail..."):
@@ -222,16 +248,26 @@ def render_task_board(user):
                         st.session_state.memory,
                         hint_profile=hint_profile,
                     )
-                    st.session_state.results, added_count = merge_new_results(
+                    st.session_state.results, added_count, added_results = merge_new_results(
                         st.session_state.results,
                         new_results,
                     )
-                    st.session_state.done_suggestions = detect_done_suggestions(
-                        st.session_state.results,
-                        messages,
-                        suggest_threshold=done_suggest_threshold,
-                        user_id=user["id"],
-                    )
+                    for result in added_results:
+                        append_event(
+                            "task_imported_email",
+                            result["id"],
+                            result["task"],
+                            task_event_payload(
+                                result,
+                                {
+                                    "account_id": st.session_state.get("selected_account_id"),
+                                    "source": "email",
+                                    "sender": result.get("meta", {}).get("sender", ""),
+                                    "sender_domain": _sender_domain(result.get("meta", {}).get("sender", "")),
+                                },
+                            ),
+                            user_id=user["id"],
+                        )
                 st.success(
                     f"Added {added_count} new task(s) from {duration_label.lower()}. "
                     f"Total tasks: {len(st.session_state.results)}."
@@ -241,10 +277,10 @@ def render_task_board(user):
                 if account_id is not None:
                     update_account_health(user["id"], int(account_id), status="error", error_msg=str(e))
                 st.error(f"Fetch/analyze failed: {e}")
-    with top_e:
+    with top_d:
         if st.button("➕ Add task", use_container_width=True, help="Add new task"):
             st.session_state.show_add_task = not st.session_state.show_add_task
-    with top_f:
+    with top_e:
         if st.button("↶", use_container_width=True, help="Undo last action"):
             if undo_last_action():
                 st.success("Undid last action.")
@@ -255,10 +291,11 @@ def render_task_board(user):
     results = st.session_state.results
     if not results:
         st.info("No tasks loaded yet. Click `Fetch + Analyze` above or add a manual task with the + button.")
-        st.markdown("If you're new, start with Account Setup.")
-        if st.button("Open Account Setup", use_container_width=True, key="open_account_setup"):
-            st.experimental_set_query_params(page="Account Setup")
-            st.experimental_rerun()
+        if not has_account_setup:
+            st.markdown("If you're new, start with Account Setup.")
+            if st.button("Open Account Setup", use_container_width=True, key="open_account_setup"):
+                st.experimental_set_query_params(page="Account Setup")
+                st.experimental_rerun()
 
     if not connected_accounts:
         st.markdown("---")
@@ -281,68 +318,46 @@ def render_task_board(user):
                     next_id = max((r["id"] for r in results), default=-1) + 1
                     task_meta = {"task": new_task_text.strip()}
                     score, predicted_bucket, reason = score_task(task_meta, st.session_state.prefs)
-                    st.session_state.results.append(
-                        {
-                            "id": next_id,
-                            "task": new_task_text.strip(),
-                            "score": score,
-                            "bucket": new_bucket,
-                            "predicted_bucket": predicted_bucket,
-                            "reason": reason,
-                            "meta": task_meta,
-                            "inferred": {},
-                            "status": "open",
-                            "manual_override": True,
-                            "override_comment": "",
-                            "source": "manual",
-                            "created_at": datetime.now().isoformat(),
-                            "updated_at": datetime.now().isoformat(),
-                        }
-                    )
+                    new_task = {
+                        "id": next_id,
+                        "task": new_task_text.strip(),
+                        "score": score,
+                        "bucket": new_bucket,
+                        "predicted_bucket": predicted_bucket,
+                        "reason": reason,
+                        "meta": task_meta,
+                        "inferred": {},
+                        "status": "open",
+                        "manual_override": True,
+                        "override_comment": "",
+                        "source": "manual",
+                        "created_at": datetime.now().isoformat(),
+                        "updated_at": datetime.now().isoformat(),
+                    }
+                    st.session_state.results.append(new_task)
                     append_event(
                         "task_created_manual",
                         next_id,
                         new_task_text.strip(),
-                        {
-                            "bucket": new_bucket,
-                            "account_id": st.session_state.get("selected_account_id"),
-                            "source": "manual",
-                        },
+                        task_event_payload(
+                            new_task,
+                            {
+                                "bucket": new_bucket,
+                                "account_id": st.session_state.get("selected_account_id"),
+                                "source": "manual",
+                            },
+                        ),
                         user_id=user["id"],
                     )
                     st.success("Task added.")
                     st.session_state.show_add_task = False
                     st.rerun()
 
-    done_suggestion_by_task = {}
-    for s in st.session_state.done_suggestions:
-        task_id = s.get("task_id")
-        if task_id is None:
-            continue
-        existing = done_suggestion_by_task.get(task_id)
-        if not existing or s.get("llm_confidence", 0) > existing.get("llm_confidence", 0):
-            done_suggestion_by_task[task_id] = s
-
     visible_results = [r for r in results if r.get("status", "open") == "open"]
-    visible_results = sorted(visible_results, key=lambda r: (r.get("manual_rank", r["id"]), -r.get("score", 0)))
-
-    table_rows = []
-    for idx, r in enumerate(visible_results):
-        hint = "💡 done?" if r["id"] in done_suggestion_by_task else ""
-        table_rows.append(
-            {
-                "id": r["id"],
-                "task": r["task"],
-                "bucket": r["bucket"],
-                "order": int(r.get("manual_rank", idx)),
-                "done?": hint,
-                "Add signals": False,
-                "Reason?": False,
-                "Reason": "; ".join(r.get("reason", [])) if r.get("reason") else "",
-                "✓": False,
-                "🗑": False,
-            }
-        )
+    visible_results = sorted(
+        visible_results,
+        key=lambda r: (r.get("manual_rank") if r.get("manual_rank") is not None else r["id"], -r.get("score", 0)),
+    )
 
     st.markdown(
         """
@@ -354,112 +369,127 @@ def render_task_board(user):
         unsafe_allow_html=True,
     )
 
-    st.caption("Filter, triage, and refine your highest-value work in one place.")
-    editor_df = st.data_editor(
-        pd.DataFrame(table_rows),
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "id": st.column_config.NumberColumn("id", disabled=True, width="small"),
-            "task": st.column_config.TextColumn("task", disabled=True, width="large"),
-            "bucket": st.column_config.SelectboxColumn("bucket", options=[b for b in BUCKET_ORDER if b != "ERROR"], required=True),
-            "order": st.column_config.NumberColumn("order", min_value=0, step=1, help="Manual reorder rank."),
-            "done?": st.column_config.TextColumn("done?", disabled=True, help="Potential done suggestion available."),
-            "Add signals": st.column_config.CheckboxColumn("Add signals"),
-            "Reason?": st.column_config.CheckboxColumn("Reason?"),
-            "Reason": st.column_config.TextColumn("Reason", disabled=True, width="large"),
-            "✓": st.column_config.CheckboxColumn("✓"),
-            "🗑": st.column_config.CheckboxColumn("🗑"),
-        },
-        key="task_table_editor",
-    )
+    st.caption("Review tasks by bucket, then move, rank, complete, or delete them from each task card.")
 
-    if editor_df.empty:
+    if not visible_results:
         st.info("No open tasks to show.")
-        return
 
     id_to_row = {r["id"]: r for r in results}
-    bucket_or_order_changed = False
-    done_ids, reason_ids, delete_ids, signal_ids = [], [], [], []
 
-    for _, edited in editor_df.iterrows():
-        task_id = int(edited["id"])
-        target = id_to_row.get(task_id)
-        if not target:
-            continue
+    tasks_by_bucket = {bucket: [] for bucket in BUCKET_ORDER if bucket != "ERROR"}
+    for task in visible_results:
+        bucket = task.get("bucket")
+        if bucket not in tasks_by_bucket:
+            bucket = "REVIEW LATER"
+        tasks_by_bucket[bucket].append(task)
 
-        new_bucket = str(edited["bucket"])
-        if new_bucket != target.get("bucket"):
-            if not bucket_or_order_changed:
-                push_undo_snapshot()
-            target["bucket"] = new_bucket
-            target["manual_override"] = new_bucket != target.get("predicted_bucket", new_bucket)
-            target["updated_at"] = datetime.now().isoformat()
-            append_event("bucket_changed", target["id"], target["task"], {"to_bucket": new_bucket}, user_id=user["id"])
-            bucket_or_order_changed = True
+    for bucket in tasks_by_bucket:
+        tasks_by_bucket[bucket] = sorted(
+            tasks_by_bucket[bucket],
+            key=lambda r: (r.get("manual_rank") if r.get("manual_rank") is not None else r["id"], -r.get("score", 0)),
+        )
 
-        new_order = int(edited["order"])
-        if new_order != int(target.get("manual_rank", target["id"])):
-            if not bucket_or_order_changed:
-                push_undo_snapshot()
-            target["manual_rank"] = new_order
-            target["updated_at"] = datetime.now().isoformat()
-            append_event("order_changed", target["id"], target["task"], {"new_order": new_order}, user_id=user["id"])
-            bucket_or_order_changed = True
+    bucket_rows = [
+        ("DO NOW", "SCHEDULE", "DELEGATE"),
+        ("REVIEW LATER", "ELIMINATE"),
+    ]
 
-        if bool(edited["✓"]):
-            done_ids.append(task_id)
-        if bool(edited["Reason?"]):
-            reason_ids.append(task_id)
-        if bool(edited["🗑"]):
-            delete_ids.append(task_id)
-        if bool(edited["Add signals"]):
-            signal_ids.append(task_id)
+    for bucket_row in bucket_rows:
+        columns = st.columns(len(bucket_row))
+        for col, bucket in zip(columns, bucket_row):
+            bucket_tasks = tasks_by_bucket.get(bucket, [])
+            with col:
+                st.markdown(
+                    f"""
+                    <div class="bucket-section-header">
+                        <div>{bucket}</div>
+                        <span>{len(bucket_tasks)}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                if not bucket_tasks:
+                    st.caption("No open tasks.")
+                    continue
 
-    if bucket_or_order_changed:
-        st.toast("Table updates applied.")
-        st.rerun()
+                for idx, task in enumerate(bucket_tasks):
+                    task_id = task["id"]
+                    with st.container(border=True):
+                        st.markdown(f'<div class="task-card-title">{task["task"]}</div>', unsafe_allow_html=True)
+                        if task.get("source") == "manual":
+                            st.markdown('<div class="task-card-meta"><span>manual</span></div>', unsafe_allow_html=True)
 
-    if done_ids:
-        push_undo_snapshot()
-        for task_id in done_ids:
-            target = id_to_row.get(task_id)
-            if not target:
-                continue
-            target["status"] = "done"
-            target["updated_at"] = datetime.now().isoformat()
-            suggestion = done_suggestion_by_task.get(task_id, {})
-            append_event(
-                "task_marked_done",
-                target["id"],
-                target["task"],
-                {
-                    "via_table_cta": True,
-                    "reason": suggestion.get("reason", ""),
-                    "evidence": suggestion.get("evidence", ""),
-                },
-                user_id=user["id"],
-            )
-        st.success(f"Marked {len(done_ids)} task(s) done.")
-        st.rerun()
+                        with st.expander("Move/order"):
+                            bucket_options = [b for b in BUCKET_ORDER if b != "ERROR"]
+                            current_bucket = task.get("bucket") if task.get("bucket") in bucket_options else bucket
+                            selected_bucket = st.selectbox(
+                                "Bucket",
+                                options=bucket_options,
+                                index=bucket_options.index(current_bucket),
+                                key=f"task_bucket_{task_id}",
+                            )
+                            if selected_bucket != task.get("bucket"):
+                                push_undo_snapshot()
+                                task["bucket"] = selected_bucket
+                                task["manual_override"] = selected_bucket != task.get("predicted_bucket", selected_bucket)
+                                task["updated_at"] = datetime.now().isoformat()
+                                append_event(
+                                    "bucket_changed",
+                                    task["id"],
+                                    task["task"],
+                                    task_event_payload(task, {"to_bucket": selected_bucket}),
+                                    user_id=user["id"],
+                                )
+                                st.toast(f"Moved task {task_id} to {selected_bucket}.")
+                                st.rerun()
 
-    if reason_ids:
-        push_undo_snapshot()
-        for task_id in reason_ids:
-            target = id_to_row.get(task_id)
-            if not target:
-                continue
-            try:
-                target["reason"] = [generate_reasoning(target["task"])]
-                target["updated_at"] = datetime.now().isoformat()
-                append_event("reason_generated", target["id"], target["task"], {}, user_id=user["id"])
-            except Exception:
-                continue
-        st.success(f"Generated reason for {len(reason_ids)} task(s).")
-        st.rerun()
+                            saved_rank = task.get("manual_rank")
+                            rank_value = int(saved_rank if saved_rank is not None else idx)
+                            new_rank = st.number_input(
+                                "Order",
+                                min_value=0,
+                                step=1,
+                                value=rank_value,
+                                key=f"task_order_{task_id}",
+                            )
+                            if int(new_rank) != rank_value:
+                                push_undo_snapshot()
+                                task["manual_rank"] = int(new_rank)
+                                task["updated_at"] = datetime.now().isoformat()
+                                append_event(
+                                    "order_changed",
+                                    task["id"],
+                                    task["task"],
+                                    task_event_payload(task, {"new_order": int(new_rank)}),
+                                    user_id=user["id"],
+                                )
+                                st.toast(f"Updated order for task {task_id}.")
+                                st.rerun()
 
-    if delete_ids:
-        st.session_state.pending_delete_ids = delete_ids
+                        done_col, delete_col = st.columns(2)
+                        with done_col:
+                            if st.button("✓", key=f"task_done_{task_id}", use_container_width=True, help="Mark done"):
+                                push_undo_snapshot()
+                                task["status"] = "done"
+                                task["updated_at"] = datetime.now().isoformat()
+                                append_event(
+                                    "task_marked_done",
+                                    task["id"],
+                                    task["task"],
+                                    task_event_payload(
+                                        task,
+                                        {
+                                            "via_card_cta": True,
+                                        },
+                                    ),
+                                    user_id=user["id"],
+                                )
+                                st.success(f"Marked task {task_id} done.")
+                                st.rerun()
+                        with delete_col:
+                            if st.button("🗑", key=f"task_delete_{task_id}", use_container_width=True, help="Delete task"):
+                                st.session_state.pending_delete_ids = [task_id]
+                                st.rerun()
 
     if st.session_state.pending_delete_ids:
         with st.container(border=True):
@@ -478,12 +508,15 @@ def render_task_board(user):
                                 "task_deleted",
                                 target["id"],
                                 target["task"],
-                                {
-                                    "account_id": st.session_state.get("selected_account_id"),
-                                    "source": target.get("source", ""),
-                                    "sender": target.get("meta", {}).get("sender", ""),
-                                    "sender_domain": _sender_domain(target.get("meta", {}).get("sender", "")),
-                                },
+                                task_event_payload(
+                                    target,
+                                    {
+                                        "account_id": st.session_state.get("selected_account_id"),
+                                        "source": target.get("source", ""),
+                                        "sender": target.get("meta", {}).get("sender", ""),
+                                        "sender_domain": _sender_domain(target.get("meta", {}).get("sender", "")),
+                                    },
+                                ),
                                 user_id=user["id"],
                             )
                     st.session_state.pending_delete_ids = []
@@ -493,102 +526,6 @@ def render_task_board(user):
                 if st.button("Cancel Delete", use_container_width=True):
                     st.session_state.pending_delete_ids = []
                     st.rerun()
-
-    if signal_ids and st.session_state.signal_wizard_task_id is None:
-        st.session_state.signal_wizard_task_id = signal_ids[0]
-        st.session_state.signal_wizard_step = 0
-        st.rerun()
-
-    wizard_task_id = st.session_state.signal_wizard_task_id
-    if wizard_task_id is not None:
-        target = id_to_row.get(wizard_task_id)
-        if not target:
-            st.session_state.signal_wizard_task_id = None
-            st.session_state.signal_wizard_step = 0
-        else:
-            questions = select_questions(target["meta"])
-            with st.container(border=True):
-                st.markdown(f"**Add signals: Task {target['id']} - {target['task']}**")
-                if not questions:
-                    st.success("No missing critical signals.")
-                    st.session_state.signal_wizard_task_id = None
-                    st.session_state.signal_wizard_step = 0
-                else:
-                    step = min(st.session_state.signal_wizard_step, len(questions) - 1)
-                    field = questions[step]
-                    st.caption(f"Step {step + 1}/{len(questions)}")
-                    key = f"wizard_{target['id']}_{field}"
-
-                    if field == "deadline":
-                        current_deadline = target["meta"].get("deadline")
-                        if current_deadline:
-                            try:
-                                default_date = datetime.strptime(current_deadline, "%Y-%m-%d").date()
-                            except ValueError:
-                                default_date = datetime.now().date()
-                        else:
-                            default_date = datetime.now().date()
-                        value = st.date_input("deadline", value=default_date, key=key).strftime("%Y-%m-%d")
-                    elif field in ("penalty_for_delay", "blocks_others"):
-                        options = ["", "yes", "no"]
-                        current = target["meta"].get(field) or ""
-                        value = st.selectbox(field, options=options, index=options.index(current) if current in options else 0, key=key)
-                    else:
-                        options = ["", "low", "medium", "high"]
-                        current = target["meta"].get(field) or ""
-                        value = st.selectbox(field, options=options, index=options.index(current) if current in options else 0, key=key)
-
-                    c1, c2, c3 = st.columns(3)
-                    with c1:
-                        if st.button("Save & Next", key=f"wizard_next_{target['id']}"):
-                            if value:
-                                target["meta"][field] = value
-                            st.session_state.signal_wizard_step += 1
-                            if st.session_state.signal_wizard_step >= len(questions):
-                                push_undo_snapshot()
-                                score, predicted_bucket, reason = score_task(target["meta"], st.session_state.prefs)
-                                target["score"] = score
-                                target["predicted_bucket"] = predicted_bucket
-                                target["reason"] = reason if reason else []
-                                if not target.get("manual_override"):
-                                    target["bucket"] = predicted_bucket
-                                try:
-                                    auto_reason = generate_reasoning(target["task"])
-                                    target["reason"] = [auto_reason]
-                                except Exception:
-                                    pass
-                                target["updated_at"] = datetime.now().isoformat()
-                                entry = append_memory_entry(target["task"], target["meta"], "clarification", user_id=user["id"])
-                                if entry:
-                                    st.session_state.memory.append(entry)
-                                append_event("clarifications_applied", target["id"], target["task"], {"fields": questions}, user_id=user["id"])
-                                st.session_state.signal_wizard_task_id = None
-                                st.session_state.signal_wizard_step = 0
-                                st.success("Signals updated, rescored, and reason generated.")
-                                st.rerun()
-                            else:
-                                st.rerun()
-                    with c2:
-                        if st.button("Skip", key=f"wizard_skip_{target['id']}"):
-                            st.session_state.signal_wizard_step += 1
-                            if st.session_state.signal_wizard_step >= len(questions):
-                                st.session_state.signal_wizard_task_id = None
-                                st.session_state.signal_wizard_step = 0
-                            st.rerun()
-                    with c3:
-                        if st.button("Close", key=f"wizard_close_{target['id']}"):
-                            st.session_state.signal_wizard_task_id = None
-                            st.session_state.signal_wizard_step = 0
-                            st.rerun()
-
-    with st.expander("Done suggestion details"):
-        if not done_suggestion_by_task:
-            st.caption("No active done suggestions.")
-        else:
-            for task_id, s in done_suggestion_by_task.items():
-                st.markdown(f"- **Task {task_id}** | confidence `{s.get('llm_confidence', 0)}` | {s.get('reason', '')}")
-                if s.get("evidence"):
-                    st.caption(f"Evidence: {s['evidence']}")
 
     done_rows = [r for r in results if r.get("status") == "done"]
     with st.expander("Reopen done tasks"):
@@ -604,6 +541,12 @@ def render_task_board(user):
                         push_undo_snapshot()
                         r["status"] = "open"
                         r["updated_at"] = datetime.now().isoformat()
-                        append_event("task_reopened", r["id"], r["task"], {"bucket": r.get("bucket")}, user_id=user["id"])
+                        append_event(
+                            "task_reopened",
+                            r["id"],
+                            r["task"],
+                            task_event_payload(r, {"bucket": r.get("bucket")}),
+                            user_id=user["id"],
+                        )
                         st.success(f"Task {r['id']} reopened.")
                         st.rerun()

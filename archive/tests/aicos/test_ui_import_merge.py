@@ -31,9 +31,10 @@ class TestImportMerge(unittest.TestCase):
             },
         ]
 
-        merged, added_count = merge_new_results(existing, incoming)
+        merged, added_count, added_results = merge_new_results(existing, incoming)
 
         self.assertEqual(added_count, 1)
+        self.assertEqual(len(added_results), 1)
         self.assertEqual(len(merged), 2)
         self.assertEqual(merged[0]["id"], 4)
         self.assertTrue(merged[0]["manual_override"])

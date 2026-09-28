@@ -21,6 +21,17 @@ def _save_prefs_file(prefs):
         json.dump(prefs, f, indent=2)
 
 
+def _decode_json_payload(value, fallback):
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return fallback
+
+
 def load_prefs(user_id=None):
     if user_id is None:
         return _load_prefs_file()
@@ -30,10 +41,8 @@ def load_prefs(user_id=None):
         row = conn.execute("SELECT prefs_json FROM user_prefs WHERE user_id = ?", (user_id,)).fetchone()
     if not row:
         return {}
-    try:
-        return json.loads(row["prefs_json"])
-    except (TypeError, json.JSONDecodeError):
-        return {}
+    payload = _decode_json_payload(row["prefs_json"], {})
+    return payload if isinstance(payload, dict) else {}
 
 
 def save_prefs(prefs, user_id=None):
@@ -119,12 +128,9 @@ def load_memory(user_id=None):
         ).fetchall()
     memory = []
     for r in rows:
-        try:
-            entry = json.loads(r["entry_json"])
-            if isinstance(entry, dict):
-                memory.append(entry)
-        except (TypeError, json.JSONDecodeError):
-            continue
+        entry = _decode_json_payload(r["entry_json"], {})
+        if isinstance(entry, dict):
+            memory.append(entry)
     return memory
 
 
@@ -247,9 +253,8 @@ def load_task_event_history(task_id, limit=8, user_id=None):
 
     history = []
     for r in reversed(rows):
-        try:
-            event = json.loads(r["event_json"])
-        except (TypeError, json.JSONDecodeError):
+        event = _decode_json_payload(r["event_json"], {})
+        if not isinstance(event, dict):
             continue
         if event.get("task_id") == task_id:
             history.append(event)
@@ -275,11 +280,9 @@ def load_events(limit=200, user_id=None):
 
     events = []
     for r in reversed(rows):
-        try:
-            event = json.loads(r["event_json"])
-        except (TypeError, json.JSONDecodeError):
-            continue
-        events.append(event)
+        event = _decode_json_payload(r["event_json"], {})
+        if isinstance(event, dict):
+            events.append(event)
     return events
 
 
@@ -307,13 +310,105 @@ def load_events_all_users(limit=2000, exclude_user_id=None):
 
     events = []
     for r in reversed(rows):
-        try:
-            event = json.loads(r["event_json"])
-        except (TypeError, json.JSONDecodeError):
+        event = _decode_json_payload(r["event_json"], {})
+        if not isinstance(event, dict):
             continue
         event["_user_id"] = int(r["user_id"])
         events.append(event)
     return events
+
+
+def _normalize_task_snapshot(snapshot, event):
+    payload = event.get("payload") or {}
+    timestamp = event.get("timestamp") or datetime.now().isoformat()
+    task_id = event.get("task_id")
+    task_text = event.get("task_text") or ""
+
+    if isinstance(snapshot, dict):
+        task = snapshot.copy()
+        task.setdefault("id", task_id)
+        task.setdefault("task", task_text)
+        task.setdefault("score", 0)
+        task.setdefault("bucket", payload.get("bucket") or "REVIEW LATER")
+        task.setdefault("predicted_bucket", task.get("bucket", "REVIEW LATER"))
+        task.setdefault("reason", [])
+        task.setdefault("meta", {"task": task.get("task", task_text)})
+        task.setdefault("inferred", {})
+        task.setdefault("status", "open")
+        task.setdefault("manual_override", False)
+        task.setdefault("override_comment", "")
+        task.setdefault("source", payload.get("source", ""))
+        task.setdefault("created_at", timestamp)
+        task.setdefault("updated_at", timestamp)
+        if task.get("manual_rank") is None:
+            task.pop("manual_rank", None)
+        return task
+
+    if task_id is None or not task_text:
+        return None
+
+    bucket = payload.get("bucket") or "REVIEW LATER"
+    source = payload.get("source") or ("manual" if event.get("event_type") == "task_created_manual" else "email")
+    return {
+        "id": task_id,
+        "task": task_text,
+        "score": 0,
+        "bucket": bucket,
+        "predicted_bucket": bucket,
+        "reason": [],
+        "meta": {"task": task_text},
+        "inferred": {},
+        "status": "open",
+        "manual_override": source == "manual",
+        "override_comment": "",
+        "source": source,
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+
+
+def load_persisted_tasks(user_id=None, limit=5000):
+    events = load_events(limit=limit, user_id=user_id)
+    tasks = {}
+
+    for event in events:
+        event_type = event.get("event_type")
+        task_id = event.get("task_id")
+        payload = event.get("payload") or {}
+        snapshot = _normalize_task_snapshot(payload.get("task_snapshot"), event)
+
+        if event_type in ("task_created_manual", "task_imported_email"):
+            if snapshot is not None:
+                tasks[snapshot["id"]] = snapshot
+            continue
+
+        if task_id is None:
+            continue
+
+        if snapshot is not None:
+            tasks[task_id] = {**tasks.get(task_id, {}), **snapshot}
+            continue
+
+        task = tasks.get(task_id)
+        if task is None:
+            continue
+
+        if event_type == "bucket_changed":
+            task["bucket"] = payload.get("to_bucket", task.get("bucket"))
+            task["manual_override"] = task.get("bucket") != task.get("predicted_bucket", task.get("bucket"))
+        elif event_type == "order_changed":
+            task["manual_rank"] = payload.get("new_order", task.get("manual_rank", task.get("id")))
+        elif event_type == "task_marked_done":
+            task["status"] = "done"
+        elif event_type == "task_deleted":
+            task["status"] = "deleted"
+        elif event_type == "task_reopened":
+            task["status"] = "open"
+            task["bucket"] = payload.get("bucket", task.get("bucket"))
+
+        task["updated_at"] = event.get("timestamp") or task.get("updated_at")
+
+    return sorted(tasks.values(), key=lambda row: row.get("id", 0))
 
 
 def migrate_local_data_to_user(user_id):
