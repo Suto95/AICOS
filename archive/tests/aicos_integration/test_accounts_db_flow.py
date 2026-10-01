@@ -53,6 +53,34 @@ class TestAccountsDbFlow(unittest.TestCase):
         self.assertEqual(account["access_token"], "access-token-1")
         self.assertEqual(account["refresh_token"], "refresh-token-1")
 
+    def test_oauth_upsert_preserves_existing_refresh_token(self):
+        ensure_login_email_account(user_id=55, email="user@example.com")
+        with patch.dict(os.environ, {"COSAI_ENCRYPTION_KEY": ""}, clear=False):
+            account_id = upsert_google_account(
+                55,
+                {
+                    "account_email": "user@example.com",
+                    "scopes": ["https://www.googleapis.com/auth/gmail.readonly", "openid"],
+                    "access_token": "access-token-1",
+                    "refresh_token": "refresh-token-1",
+                    "token_expiry": "2026-05-01T00:00:00",
+                },
+            )
+            upsert_google_account(
+                55,
+                {
+                    "account_email": "user@example.com",
+                    "scopes": ["https://www.googleapis.com/auth/gmail.readonly", "openid"],
+                    "access_token": "access-token-2",
+                    "refresh_token": "",
+                    "token_expiry": "2026-05-02T00:00:00",
+                },
+            )
+
+        account = get_active_account(55, account_id)
+        self.assertEqual(account["access_token"], "access-token-2")
+        self.assertEqual(account["refresh_token"], "refresh-token-1")
+
     def test_oauth_state_cache_roundtrip(self):
         cache_oauth_verifier(user_id=0, state="s1", code_verifier="v1")
         value = pop_oauth_verifier(user_id=0, state="s1")

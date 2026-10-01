@@ -53,6 +53,44 @@ ACTION_HINT_PATTERNS = [
     r"\binvoice\b",
 ]
 
+STRONG_ACTION_PATTERNS = [
+    r"\baction required\b",
+    r"\brequired immediately\b",
+    r"\bdeadline\b",
+    r"\bdue (?:today|tomorrow|monday|tuesday|wednesday|thursday|friday)\b",
+    r"\bby (?:today|tomorrow|monday|tuesday|wednesday|thursday|friday)\b",
+    r"\bapprove\b",
+    r"\bsubmit\b",
+    r"\bfix\b",
+]
+
+MARKETING_PATTERNS = [
+    r"\bunsubscribe\b",
+    r"\bnewsletter\b",
+    r"\bpromo(?:tion)?\b",
+    r"\boffer\b",
+    r"\bsale\b",
+    r"\bdiscount\b",
+    r"\bwebinar\b",
+]
+
+NON_ACTION_PATTERNS = [
+    r"\bno (?:further )?action (?:is )?(?:needed|required)?(?: from| for)? you\b",
+    r"\bno (?:further )?action (?:is )?(?:needed|required)\b",
+    r"\b(?:ignore|disregard) (?:my |the )?(?:previous|earlier) request\b",
+    r"\b(?:task|work|review|migration|request) (?:is )?(?:complete|completed|finished)\b",
+    r"\bcompleted successfully\b",
+]
+
+AMBIGUOUS_OWNER_PATTERNS = [
+    r"\bcan someone\b",
+    r"\bcould someone\b",
+    r"\bcan anyone\b",
+    r"\bcould anyone\b",
+    r"\bnot sure who owns\b",
+    r"\bwho (?:can|could|will) (?:own|handle|review|take)\b",
+]
+
 
 # ---------- generic utils ----------
 def safe_json_parse(content):
@@ -209,13 +247,29 @@ def build_compact_message_context(message, max_body_chars=500):
 def is_task_like_message(message, hint_profile=None):
     subject = (message.get("subject") or message.get("text") or "").lower()
     snippet = (message.get("snippet") or "").lower()
+    body = (message.get("body") or "").lower()
     sender = (message.get("sender") or "").lower()
     hay = " ".join([subject, snippet, sender])
+    summary_context = " ".join([subject, snippet])
+    full_context = " ".join([subject, snippet, body, sender])
     token_set = tokenize_text(f"{subject} {snippet}")
     sender_domain = _sender_domain(sender)
     has_action_phrase = any(re.search(p, hay) for p in ACTION_HINT_PATTERNS)
+    has_strong_action = any(re.search(p, hay) for p in STRONG_ACTION_PATTERNS)
 
     if not hay.strip():
+        return False
+
+    # Corrections, completion notices, and unowned requests should not create work
+    # for the recipient merely because they contain words such as "request" or "review".
+    if any(re.search(p, summary_context) for p in NON_ACTION_PATTERNS):
+        return False
+    if any(re.search(p, summary_context) for p in AMBIGUOUS_OWNER_PATTERNS):
+        return False
+
+    # Marketing often uses weak calls to action ("please review", "see offer").
+    # Only explicit operational language is allowed to override marketing signals.
+    if any(re.search(p, full_context) for p in MARKETING_PATTERNS) and not has_strong_action:
         return False
 
     if hint_profile:
@@ -232,7 +286,7 @@ def is_task_like_message(message, hint_profile=None):
 
     if any(re.search(p, hay) for p in NOISE_SUBJECT_PATTERNS):
         # Still allow if strong action words exist.
-        return has_action_phrase
+        return has_strong_action
 
     return has_action_phrase
 

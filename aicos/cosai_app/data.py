@@ -382,6 +382,18 @@ def load_persisted_tasks(user_id=None, limit=5000):
                 tasks[snapshot["id"]] = snapshot
             continue
 
+        if event_type == "task_edited":
+            if snapshot is not None:
+                tasks[snapshot["id"]] = {**tasks.get(snapshot["id"], {}), **snapshot}
+            elif task_id is not None:
+                task = tasks.get(task_id)
+                if task is not None:
+                    updated_text = payload.get("new_task") or payload.get("task_snapshot", {}).get("task") or task.get("task")
+                    task["task"] = updated_text
+                    task.setdefault("meta", {})["task"] = updated_text
+                    task["updated_at"] = event.get("timestamp") or task.get("updated_at")
+            continue
+
         if task_id is None:
             continue
 

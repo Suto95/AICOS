@@ -415,7 +415,55 @@ def render_task_board(user):
                 for idx, task in enumerate(bucket_tasks):
                     task_id = task["id"]
                     with st.container(border=True):
-                        st.markdown(f'<div class="task-card-title">{task["task"]}</div>', unsafe_allow_html=True)
+                        if st.session_state.get("edit_task_id") == task_id:
+                            edited_task = st.text_area(
+                                "Task description",
+                                value=task.get("task", ""),
+                                key=f"editing_task_text_{task_id}",
+                                label_visibility="collapsed",
+                            )
+                            save_col, cancel_col = st.columns(2)
+                            with save_col:
+                                if st.button("Save", key=f"save_task_edit_{task_id}", use_container_width=True):
+                                    new_text = edited_task.strip()
+                                    if not new_text:
+                                        st.warning("Task description cannot be empty.")
+                                    else:
+                                        previous_task = task.get("task", "")
+                                        push_undo_snapshot()
+                                        task["task"] = new_text
+                                        task.setdefault("meta", {})["task"] = new_text
+                                        task["updated_at"] = datetime.now().isoformat()
+                                        append_event(
+                                            "task_edited",
+                                            task_id,
+                                            new_text,
+                                            task_event_payload(
+                                                task,
+                                                {
+                                                    "field": "task",
+                                                    "previous_task": previous_task,
+                                                    "account_id": st.session_state.get("selected_account_id"),
+                                                },
+                                            ),
+                                            user_id=user["id"],
+                                        )
+                                        st.session_state.edit_task_id = None
+                                        st.success("Task description updated.")
+                                        st.rerun()
+                            with cancel_col:
+                                if st.button("Cancel", key=f"cancel_task_edit_{task_id}", use_container_width=True):
+                                    st.session_state.edit_task_id = None
+                                    st.rerun()
+                        else:
+                            if st.button(
+                                task.get("task") or "Untitled task",
+                                key=f"open_task_edit_{task_id}",
+                                use_container_width=True,
+                                help="Click to edit this task description",
+                            ):
+                                st.session_state.edit_task_id = task_id
+                                st.rerun()
                         if task.get("source") == "manual":
                             st.markdown('<div class="task-card-meta"><span>manual</span></div>', unsafe_allow_html=True)
 

@@ -1,5 +1,7 @@
 import unittest
+from unittest.mock import patch
 
+from cosai_app.data import load_persisted_tasks
 from cosai_app.logic import (
     build_compact_message_context,
     compute_features,
@@ -41,6 +43,74 @@ class TestHintLearning(unittest.TestCase):
         noise_msg = {"subject": "Weekly newsletter discount", "snippet": "big promo", "sender": "ads@noise.example.com"}
         self.assertTrue(is_task_like_message(action_msg, hint_profile=hint_profile))
         self.assertFalse(is_task_like_message(noise_msg, hint_profile=hint_profile))
+
+    def test_is_task_like_message_rejects_non_owned_completed_and_marketing_mail(self):
+        rejected_messages = [
+            {
+                "subject": "Can someone review the partner document?",
+                "snippet": "Not sure who owns this.",
+                "sender": "projects@example.com",
+            },
+            {
+                "subject": "Please review your exclusive discount offer",
+                "snippet": "Limited-time promotion.",
+                "sender": "promo@example.com",
+            },
+            {
+                "subject": "Task complete: access review finished",
+                "snippet": "No further action is needed from you.",
+                "sender": "security@example.com",
+            },
+            {
+                "subject": "Correction: Alex owns the report, no action for you",
+                "snippet": "Please ignore my previous request.",
+                "sender": "manager@example.com",
+            },
+        ]
+
+        for message in rejected_messages:
+            with self.subTest(subject=message["subject"]):
+                self.assertFalse(is_task_like_message(message))
+
+    def test_is_task_like_message_keeps_strong_automated_actions(self):
+        message = {
+            "subject": "Action required: reset compromised password today",
+            "snippet": "Reset is required immediately.",
+            "sender": "no-reply@security.example.com",
+        }
+        self.assertTrue(is_task_like_message(message))
+
+    def test_completed_text_in_quoted_body_does_not_hide_new_task(self):
+        message = {
+            "subject": "Please approve the new rollout plan",
+            "snippet": "Approval is due today.",
+            "body": "Quoted history: the previous migration completed successfully.",
+            "sender": "ops@example.com",
+        }
+        self.assertTrue(is_task_like_message(message))
+
+    def test_load_persisted_tasks_applies_task_description_edits(self):
+        events = [
+            {
+                "event_type": "task_created_manual",
+                "task_id": 7,
+                "task_text": "Old description",
+                "payload": {"task_snapshot": {"id": 7, "task": "Old description", "source": "manual"}},
+            },
+            {
+                "event_type": "task_edited",
+                "task_id": 7,
+                "task_text": "Updated description",
+                "payload": {
+                    "task_snapshot": {"id": 7, "task": "Updated description", "source": "manual"},
+                    "field": "task",
+                },
+            },
+        ]
+        with patch("cosai_app.data.load_events", return_value=events):
+            tasks = load_persisted_tasks(user_id=99)
+        self.assertEqual(tasks[0]["task"], "Updated description")
+        self.assertEqual(tasks[0]["meta"]["task"], "Updated description")
 
     def test_compact_message_context_truncates_body(self):
         msg = {

@@ -106,7 +106,8 @@ def upsert_google_account(user_id, token_payload):
     account_email = token_payload.get("account_email", "")
     scopes = " ".join(token_payload.get("scopes", []))
     access_token = encrypt_secret(token_payload.get("access_token", ""))
-    refresh_token = encrypt_secret(token_payload.get("refresh_token", ""))
+    raw_refresh_token = token_payload.get("refresh_token", "")
+    refresh_token = encrypt_secret(raw_refresh_token)
     token_expiry = token_payload.get("token_expiry", "")
 
     with get_conn() as conn:
@@ -119,6 +120,12 @@ def upsert_google_account(user_id, token_payload):
         ).fetchone()
 
         if row:
+            if not raw_refresh_token:
+                existing = conn.execute(
+                    "SELECT refresh_token FROM connected_accounts WHERE id = ?",
+                    (int(row["id"]),),
+                ).fetchone()
+                refresh_token = existing["refresh_token"] if existing else ""
             conn.execute(
                 """
                 UPDATE connected_accounts
