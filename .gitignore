@@ -12,3 +12,4 @@ gmail_oauth_token.json
 token.pickle
 secrets.toml
 supabase_cred.txt
+.env.bak

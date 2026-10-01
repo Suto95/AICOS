@@ -201,6 +201,35 @@ def transform_json_fields(row):
     return row
 
 
+def reset_postgres_sequences(postgres_conn):
+    """Reset all SERIAL sequences after migration to prevent duplicate key errors.
+    
+    When migrating data with explicit IDs from SQLite to PostgreSQL, the SERIAL
+    sequences must be updated to start from max(id) + 1, otherwise new inserts
+    will fail with duplicate key constraint violations.
+    """
+    print("Resetting PostgreSQL sequences...")
+    with postgres_conn.cursor() as cur:
+        # Tables with SERIAL primary keys
+        tables_with_sequences = ['users', 'connected_accounts', 'task_memory', 'task_events']
+        
+        for table in tables_with_sequences:
+            cur.execute(f"SELECT MAX(id) FROM {table};")
+            max_id = cur.fetchone()[0]
+            if max_id is not None:
+                sequence_name = f"{table}_id_seq"
+                # Set sequence to max_id + 1 so next insert uses that value
+                cur.execute(f"SELECT setval('{sequence_name}', {max_id} + 1);")
+                print(f"  {sequence_name}: set to {max_id + 1}")
+            else:
+                # If table is empty, reset sequence to 1
+                sequence_name = f"{table}_id_seq"
+                cur.execute(f"SELECT setval('{sequence_name}', 1);")
+                print(f"  {sequence_name}: reset to 1 (empty table)")
+    
+    postgres_conn.commit()
+
+
 def main():
     print("Starting SQLite → PostgreSQL migration...")
 
@@ -229,6 +258,9 @@ def main():
 
         # Skip oauth_state_cache - it's a temporary cache that doesn't need migration
         print("Skipping oauth_state_cache (temporary cache, not needed for production)")
+
+        # CRITICAL: Reset sequences after migration to prevent duplicate key errors
+        reset_postgres_sequences(postgres_conn)
 
         print("Migration completed successfully!")
 

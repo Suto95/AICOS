@@ -4,6 +4,9 @@ import warnings
 from contextlib import contextmanager
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_PATH = Path(__file__).resolve().parent.parent / "cosai_app.db"
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -86,7 +89,8 @@ def _use_postgres():
         import psycopg2
 
         with psycopg2.connect(DATABASE_URL, connect_timeout=3) as conn:
-            conn.execute("SELECT 1")
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
         return True
     except Exception as exc:
         warnings.warn(
@@ -227,12 +231,23 @@ def init_postgres_db():
 
             CREATE TABLE IF NOT EXISTS oauth_state_cache (
                 state TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id),
+                user_id INTEGER NOT NULL,
                 code_verifier TEXT NOT NULL,
                 created_at TIMESTAMP NOT NULL
             );
             """)
         conn.commit()
+
+        try:
+            conn.execute(
+                """
+                ALTER TABLE oauth_state_cache
+                DROP CONSTRAINT IF EXISTS oauth_state_cache_user_id_fkey;
+                """
+            )
+            conn.commit()
+        except Exception:
+            pass
 
 
 @contextmanager
