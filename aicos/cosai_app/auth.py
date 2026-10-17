@@ -23,6 +23,23 @@ def _allowed_emails():
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
+def developer_emails():
+    raw = os.getenv("COSAI_DEVELOPER_EMAILS", os.getenv("COSAI_ALLOWED_EMAILS", ""))
+    if not raw.strip():
+        return set()
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def is_developer_user(email=None):
+    if email is None:
+        user = current_user()
+        if not user:
+            return False
+        email = str(user.get("email") or "")
+    email = email.strip().lower()
+    return email in developer_emails()
+
+
 def _find_or_create_user(email):
     now = datetime.now().isoformat()
     with get_conn() as conn:

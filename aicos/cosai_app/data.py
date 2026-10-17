@@ -2,7 +2,7 @@ import json
 import os
 from datetime import datetime
 
-from .config import PREF_FILE, MEMORY_FILE, EVENT_FILE, LEARNABLE_FIELDS, SIGNAL_FIELDS
+from .config import PREF_FILE, MEMORY_FILE, EVENT_FILE, SIGNAL_FIELDS
 from .db import get_conn, init_db
 
 
@@ -66,17 +66,6 @@ def save_prefs(prefs, user_id=None):
                 (user_id, payload, now),
             )
         conn.commit()
-
-
-def update_preferences(task, prefs):
-    for field in LEARNABLE_FIELDS:
-        val = task.get(field)
-        if not val:
-            continue
-        prefs.setdefault(field, {"low": 0, "medium": 0, "high": 0})
-        if val in prefs[field]:
-            prefs[field][val] += 1
-    return prefs
 
 
 def get_learned_weight(field, prefs):
