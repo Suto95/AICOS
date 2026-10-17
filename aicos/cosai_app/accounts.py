@@ -60,9 +60,19 @@ def pop_oauth_verifier(user_id, state):
             """,
             (state, user_id),
         ).fetchone()
+        if not row:
+            row = conn.execute(
+                """
+                SELECT code_verifier
+                FROM oauth_state_cache
+                WHERE state = ?
+                """,
+                (state,),
+            ).fetchone()
+
         if row:
             code_verifier = row["code_verifier"]
-            conn.execute("DELETE FROM oauth_state_cache WHERE state = ? AND user_id = ?", (state, user_id))
+            conn.execute("DELETE FROM oauth_state_cache WHERE state = ?", (state,))
             conn.commit()
             return code_verifier
     return None

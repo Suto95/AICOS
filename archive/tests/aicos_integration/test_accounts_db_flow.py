@@ -88,6 +88,13 @@ class TestAccountsDbFlow(unittest.TestCase):
         second = pop_oauth_verifier(user_id=0, state="s1")
         self.assertIsNone(second)
 
+    def test_oauth_state_cache_falls_back_when_user_id_mismatches(self):
+        cache_oauth_verifier(user_id=0, state="s2", code_verifier="v2")
+        value = pop_oauth_verifier(user_id=99, state="s2")
+        self.assertEqual(value, "v2")
+        second = pop_oauth_verifier(user_id=99, state="s2")
+        self.assertIsNone(second)
+
 
 if __name__ == "__main__":
     unittest.main()
