@@ -1,5 +1,6 @@
 .venv/
 .env
+.env.production
 __pycache__/
 *.pyc
 *.db
@@ -13,3 +14,5 @@ token.pickle
 secrets.toml
 supabase_cred.txt
 .env.bak
+web/node_modules/
+web/dist/
