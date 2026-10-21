@@ -60,6 +60,11 @@ from .session_auth import create_session_token, decode_session_token, refresh_se
 app = FastAPI(title="AICOS Migration API", version="0.1.0")
 
 
+@app.on_event("startup")
+def initialize_database() -> None:
+    init_db()
+
+
 def _allowed_origins() -> List[str]:
     raw = (os.getenv("COSAI_API_CORS_ORIGINS") or "").strip()
     if raw:

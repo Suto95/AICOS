@@ -35,19 +35,38 @@ def list_connected_accounts(user_id):
 def cache_oauth_verifier(user_id, state, code_verifier):
     init_db()
     now = datetime.now().isoformat()
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO oauth_state_cache(state, user_id, code_verifier, created_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(state) DO UPDATE SET
-                user_id = excluded.user_id,
-                code_verifier = excluded.code_verifier,
-                created_at = excluded.created_at
-            """,
-            (state, user_id, code_verifier, now),
-        )
-        conn.commit()
+    try:
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO oauth_state_cache(state, user_id, code_verifier, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(state) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    code_verifier = excluded.code_verifier,
+                    created_at = excluded.created_at
+                """,
+                (state, user_id, code_verifier, now),
+            )
+            conn.commit()
+    except Exception as exc:
+        # Recover from stale bootstraps where oauth_state_cache was not initialized yet.
+        if "oauth_state_cache" not in str(exc):
+            raise
+        init_db()
+        with get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO oauth_state_cache(state, user_id, code_verifier, created_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(state) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    code_verifier = excluded.code_verifier,
+                    created_at = excluded.created_at
+                """,
+                (state, user_id, code_verifier, now),
+            )
+            conn.commit()
 
 
 def pop_oauth_verifier(user_id, state):
