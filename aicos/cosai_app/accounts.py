@@ -33,6 +33,7 @@ def list_connected_accounts(user_id):
 
 
 def cache_oauth_verifier(user_id, state, code_verifier):
+    init_db()
     now = datetime.now().isoformat()
     with get_conn() as conn:
         conn.execute(
