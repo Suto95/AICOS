@@ -31,11 +31,28 @@ body {
   padding: 2rem 1rem 4rem;
 }
 
-.floating-auth {
+.floating-actions {
   position: fixed;
   top: 14px;
   right: 14px;
   z-index: 20;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.floating-fetch {
+  width: 210px;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0.55rem;
+  background: rgba(255, 255, 255, 0.94);
+  display: grid;
+  gap: 0.4rem;
+}
+
+.floating-auth {
+  position: relative;
 }
 
 .auth-toggle {
@@ -52,6 +69,21 @@ body {
   background: rgba(255, 255, 255, 0.95);
   display: grid;
   gap: 0.45rem;
+}
+
+.brand-header {
+  margin-top: 0.4rem;
+  margin-bottom: 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.brand-header h1 {
+  margin: 0;
+  font-size: clamp(1.35rem, 3vw, 2.05rem);
+  font-family: "Space Grotesk", sans-serif;
 }
 
 .hero {
@@ -206,6 +238,31 @@ label {
   gap: 0.5rem;
 }
 
+.summary-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.summary-row div {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.summary-row span {
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.summary-row strong {
+  font-size: 1.35rem;
+}
+
 .kpi-grid div {
   border: 1px solid var(--line);
   border-radius: 0.75rem;
@@ -275,6 +332,18 @@ label {
   background: rgba(255, 255, 255, 0.8);
 }
 
+.bucket-add-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+.bucket-add-row button {
+  width: auto;
+  padding: 0.45rem 0.62rem;
+}
+
 .task-actions-row {
   margin-top: 0.45rem;
   display: grid;
@@ -315,6 +384,25 @@ label {
 }
 
 @media (max-width: 760px) {
+  .floating-actions {
+    position: static;
+    margin-bottom: 0.8rem;
+    flex-direction: column;
+  }
+
+  .floating-fetch {
+    width: 100%;
+  }
+
+  .brand-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .summary-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .controls {
     grid-template-columns: 1fr;
   }

@@ -46,8 +46,7 @@ export default function App() {
   const [tasks, setTasks] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [insights, setInsights] = useState(null);
-  const [taskText, setTaskText] = useState("");
-  const [bucket, setBucket] = useState("REVIEW LATER");
+  const [bucketDrafts, setBucketDrafts] = useState({});
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
@@ -65,11 +64,23 @@ export default function App() {
     use_env_fallback: true,
   });
 
-  const openTasks = useMemo(() => tasks.filter((t) => t.status === "open"), [tasks]);
+  const isSignedIn = Boolean(sessionToken);
+
+  const signedOpenTasks = useMemo(
+    () => tasks.filter((t) => t.status !== "done" && t.status !== "deleted"),
+    [tasks],
+  );
+
+  const signedDoneTasks = useMemo(
+    () => tasks.filter((t) => t.status === "done"),
+    [tasks],
+  );
+
   const anonOpenTasks = useMemo(
     () => sortByOrder(anonymousTasks.filter((t) => t.status !== "done")),
     [anonymousTasks],
   );
+
   const anonDoneTasks = useMemo(
     () => sortByOrder(anonymousTasks.filter((t) => t.status === "done")),
     [anonymousTasks],
@@ -142,16 +153,15 @@ export default function App() {
       try {
         const redirectUri = `${window.location.origin}${window.location.pathname}`;
         const result = await completeGoogleOAuth(code, state, redirectUri);
+        const nextToken = result.session_token || sessionToken;
         if (result.session_token) {
           setSessionToken(result.session_token);
         }
         setCurrentUser({ user_id: result.user_id, email: result.email });
         window.history.replaceState({}, document.title, window.location.pathname);
-        const loadedTasks = await loadAllForSession(result.session_token || sessionToken);
+        await loadAllForSession(nextToken);
         if (anonymousTasks.length > 0) {
           setMergeChoiceNeeded(true);
-        } else if ((loadedTasks || []).length === 0) {
-          setMergeChoiceNeeded(false);
         }
       } catch (e) {
         setError(String(e.message || e));
@@ -165,7 +175,6 @@ export default function App() {
 
   async function loadAllForSession(targetToken = sessionToken) {
     if (!targetToken) {
-      setError("Sign in with Google to load tasks.");
       return;
     }
     setError("");
@@ -183,17 +192,11 @@ export default function App() {
       if (settingsResp) {
         setAiSettings(settingsResp);
       }
-      return taskResp.items || [];
     } catch (e) {
       setError(String(e.message || e));
-      return [];
     } finally {
       setBusy(false);
     }
-  }
-
-  async function loadAll() {
-    await loadAllForSession(sessionToken);
   }
 
   async function beginGoogleLogin() {
@@ -209,9 +212,9 @@ export default function App() {
     }
   }
 
-  async function addTask(e) {
-    e.preventDefault();
-    if (!taskText.trim()) {
+  async function addTaskForBucket(bucketName) {
+    const text = String(bucketDrafts[bucketName] || "").trim();
+    if (!text) {
       return;
     }
 
@@ -226,13 +229,13 @@ export default function App() {
         : 1;
       const localTask = {
         id: `anon-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        task: taskText.trim(),
-        bucket,
+        task: text,
+        bucket: bucketName,
         status: "open",
         order: nextOrder,
       };
       setAnonymousTasks((prev) => [...prev, localTask]);
-      setTaskText("");
+      setBucketDrafts((prev) => ({ ...prev, [bucketName]: "" }));
       setError("");
       return;
     }
@@ -240,9 +243,9 @@ export default function App() {
     setError("");
     setBusy(true);
     try {
-      await createTask(sessionToken, taskText.trim(), bucket);
-      setTaskText("");
-      await loadAll();
+      await createTask(sessionToken, text, bucketName);
+      setBucketDrafts((prev) => ({ ...prev, [bucketName]: "" }));
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
       setBusy(false);
@@ -256,12 +259,11 @@ export default function App() {
       );
       return;
     }
-
     setBusy(true);
     setError("");
     try {
       await setTaskStatus(sessionToken, taskId, "done");
-      await loadAll();
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
       setBusy(false);
@@ -279,7 +281,7 @@ export default function App() {
     setError("");
     try {
       await setTaskStatus(sessionToken, taskId, "open");
-      await loadAll();
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
       setBusy(false);
@@ -316,33 +318,9 @@ export default function App() {
     });
   }
 
-  async function saveAccountFilter(accountId, queryFilter) {
-    setBusy(true);
-    setError("");
-    try {
-      await updateQueryFilter(sessionToken, accountId, queryFilter);
-      await loadAll();
-    } catch (e) {
-      setError(String(e.message || e));
-      setBusy(false);
-    }
-  }
-
-  async function removeAccount(accountId) {
-    setBusy(true);
-    setError("");
-    try {
-      await disconnectAccount(sessionToken, accountId);
-      await loadAll();
-    } catch (e) {
-      setError(String(e.message || e));
-      setBusy(false);
-    }
-  }
-
   async function runFetchAnalyze() {
     if (!sessionToken) {
-      setError("Sign in with Google to fetch and analyze emails.");
+      setError("Sign up for free and connect Google to use fetch + analyze.");
       return;
     }
     setBusy(true);
@@ -350,13 +328,12 @@ export default function App() {
     try {
       const active = (accounts || []).filter((a) => a.status === "active");
       const accountId = active.length ? active[0].id : null;
-      const payload = {
+      await fetchAnalyze(sessionToken, {
         account_id: accountId,
         duration_label: durationLabel,
         persist: true,
-      };
-      await fetchAnalyze(sessionToken, payload);
-      await loadAll();
+      });
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
       setBusy(false);
@@ -365,7 +342,7 @@ export default function App() {
 
   async function saveAiModelSettings() {
     if (!sessionToken) {
-      setError("Sign in with Google to update AI settings.");
+      setError("Sign up for free to save AI settings.");
       return;
     }
     setBusy(true);
@@ -379,7 +356,37 @@ export default function App() {
         use_env_fallback: Boolean(aiSettings.use_env_fallback),
       });
       setAiSettings(updated);
-      await loadAll();
+      await loadAllForSession(sessionToken);
+    } catch (e) {
+      setError(String(e.message || e));
+      setBusy(false);
+    }
+  }
+
+  async function saveAccountFilter(accountId, queryFilter) {
+    if (!isSignedIn) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await updateQueryFilter(sessionToken, accountId, queryFilter);
+      await loadAllForSession(sessionToken);
+    } catch (e) {
+      setError(String(e.message || e));
+      setBusy(false);
+    }
+  }
+
+  async function removeAccount(accountId) {
+    if (!isSignedIn) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await disconnectAccount(sessionToken, accountId);
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
       setBusy(false);
@@ -402,7 +409,7 @@ export default function App() {
       }
       setAnonymousTasks([]);
       setMergeChoiceNeeded(false);
-      await loadAll();
+      await loadAllForSession(sessionToken);
     } catch (e) {
       setError(String(e.message || e));
     } finally {
@@ -423,39 +430,60 @@ export default function App() {
     setInsights(null);
   }
 
-  const isSignedIn = Boolean(sessionToken);
+  const boardTasks = isSignedIn ? signedOpenTasks : anonOpenTasks;
+  const doneTasks = isSignedIn ? signedDoneTasks : anonDoneTasks;
 
   return (
     <div className="app-shell">
-      <div className="floating-auth" onMouseEnter={() => setAuthHoverOpen(true)} onMouseLeave={() => setAuthHoverOpen(false)}>
-        <button className="auth-toggle">
-          {isSignedIn ? "Account" : "Sign up for free"}
-        </button>
-        {authHoverOpen ? (
-          <div className="auth-popover">
-            <strong>{isSignedIn ? (currentUser?.email || "Signed in") : "Start free"}</strong>
-            {!isSignedIn ? (
-              <>
-                <button onClick={beginGoogleLogin} disabled={oauthBusy}>{oauthBusy ? "Signing in..." : "Continue with Google"}</button>
-                <button disabled title="Coming soon">Continue with Outlook (soon)</button>
-              </>
-            ) : (
-              <button onClick={signOut}>Sign Out</button>
-            )}
-          </div>
-        ) : null}
+      <div className="floating-actions">
+        <div className="floating-fetch">
+          <button onClick={runFetchAnalyze} disabled={busy || !isSignedIn}>
+            {busy ? "Working..." : "Fetch + Analyze"}
+          </button>
+          <select value={durationLabel} onChange={(e) => setDurationLabel(e.target.value)}>
+            {DURATION_OPTIONS.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="floating-auth" onMouseEnter={() => setAuthHoverOpen(true)} onMouseLeave={() => setAuthHoverOpen(false)}>
+          <button className="auth-toggle">
+            {isSignedIn ? "Account" : "Sign up for free"}
+          </button>
+          {authHoverOpen ? (
+            <div className="auth-popover">
+              <strong>{isSignedIn ? (currentUser?.email || "Signed in") : "Start free"}</strong>
+              {!isSignedIn ? (
+                <>
+                  <button onClick={beginGoogleLogin} disabled={oauthBusy}>{oauthBusy ? "Signing in..." : "Continue with Google"}</button>
+                  <button disabled title="Coming soon">Continue with Outlook (soon)</button>
+                </>
+              ) : (
+                <button onClick={signOut}>Sign Out</button>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
 
-      <header className="hero">
-        <div className="hero-badge">AICOS Migration UI</div>
-        <h1>React Control Surface</h1>
-        <p>{isSignedIn ? "Connected workflow with Gmail ingest and insights." : "Try the full task board instantly before signing up."}</p>
+      <header className="brand-header">
+        <h1>AICOS - your AI Chief Of Staff</h1>
+        <div className={`health ${health === "ok" ? "ok" : "warn"}`}>API Health: {health}</div>
       </header>
 
       {!isSignedIn && anonymousTasks.length > 0 ? (
         <section className="panel warning-banner">
           <strong>Your tasks are temporary until you sign up for free.</strong>
           <div>Leave this page and these tasks can be lost.</div>
+          <button onClick={beginGoogleLogin} disabled={oauthBusy}>{oauthBusy ? "Signing in..." : "Sign up for free"}</button>
+        </section>
+      ) : null}
+
+      {showSignupNudge && !isSignedIn ? (
+        <section className="panel warning-banner">
+          <strong>You reached the free preview limit.</strong>
+          <div>Add up to 5 tasks in preview mode. Sign up for free to continue adding.</div>
           <button onClick={beginGoogleLogin} disabled={oauthBusy}>{oauthBusy ? "Signing in..." : "Sign up for free"}</button>
         </section>
       ) : null}
@@ -471,125 +499,77 @@ export default function App() {
         </section>
       ) : null}
 
-      <section className="panel controls">
-        <div>
-          <strong>{currentUser?.email || "Not signed in"}</strong>
-          <div style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
-            {currentUser?.user_id ? `User ${currentUser.user_id}` : "Anonymous sandbox mode"}
-          </div>
-        </div>
-        <button onClick={loadAll} disabled={busy || !isSignedIn}>Refresh Data</button>
-        <button onClick={beginGoogleLogin} disabled={oauthBusy}>{oauthBusy ? "Signing in..." : isSignedIn ? "Reconnect" : "Sign up for free"}</button>
-        <button onClick={signOut} disabled={!isSignedIn}>Sign Out</button>
-        <div className={`health ${health === "ok" ? "ok" : "warn"}`}>API Health: {health}</div>
-      </section>
-
       {error ? <div className="error">{error}</div> : null}
 
-      <section className="grid">
-        <article className="panel">
-          <h2>Create Task</h2>
-          <form onSubmit={addTask} className="stack">
-            <input
-              placeholder="Type a task"
-              value={taskText}
-              onChange={(e) => setTaskText(e.target.value)}
-            />
-            <select value={bucket} onChange={(e) => setBucket(e.target.value)}>
-              {BUCKETS.map((b) => (
-                <option key={b} value={b}>{b}</option>
-              ))}
-            </select>
-            <button type="submit" disabled={busy}>Add</button>
-          </form>
-          {!isSignedIn ? (
-            <small style={{ color: "var(--muted)" }}>
-              Anonymous limit: {anonymousTasks.length}/{ANON_TASK_LIMIT} tasks. Sign up for free to save and scale.
-            </small>
-          ) : null}
-        </article>
-
-        <article className="panel">
-          <h2>Fetch + Analyze</h2>
-          <div className="stack">
-            <label>
-              Fetch window
-              <select value={durationLabel} onChange={(e) => setDurationLabel(e.target.value)}>
-                {DURATION_OPTIONS.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </label>
-            <button onClick={runFetchAnalyze} disabled={busy || !isSignedIn}>Fetch + Analyze</button>
-          </div>
-          {!isSignedIn ? <small style={{ color: "var(--muted)" }}>Available after signup/login.</small> : null}
-        </article>
-
-        <article className="panel">
-          <h2>Insights</h2>
-          <div className="kpi-grid">
-            <div><span>Active</span><strong>{insights?.active_tasks ?? "-"}</strong></div>
-            <div><span>Done</span><strong>{insights?.done_tasks ?? "-"}</strong></div>
-            <div><span>Memory</span><strong>{insights?.memory_entries ?? "-"}</strong></div>
-            <div><span>Events</span><strong>{insights?.recent_events ?? "-"}</strong></div>
-          </div>
-        </article>
+      <section className="panel">
+        <h2>Summary</h2>
+        <div className="summary-row">
+          <div><span>Active</span><strong>{isSignedIn ? (insights?.active_tasks ?? "-") : anonOpenTasks.length}</strong></div>
+          <div><span>Done</span><strong>{isSignedIn ? (insights?.done_tasks ?? "-") : anonDoneTasks.length}</strong></div>
+          <div><span>Memory</span><strong>{insights?.memory_entries ?? "-"}</strong></div>
+          <div><span>Events</span><strong>{insights?.recent_events ?? "-"}</strong></div>
+        </div>
       </section>
 
       <section className="panel">
-        <h2>{isSignedIn ? `Open Tasks (${openTasks.length})` : `Sandbox Task Board (${anonOpenTasks.length})`}</h2>
-        {isSignedIn ? (
-          <ul className="list">
-            {openTasks.map((task) => (
-              <li key={task.id}>
-                <div>
-                  <strong>{task.task}</strong>
-                  <small>{task.bucket}</small>
+        <h2>{isSignedIn ? `Task Board (${boardTasks.length})` : `Sandbox Task Board (${boardTasks.length})`}</h2>
+        <div className="bucket-board">
+          {BUCKETS.map((bucketName) => {
+            const bucketItems = boardTasks.filter((t) => t.bucket === bucketName);
+            return (
+              <div className="bucket-column" key={bucketName}>
+                <h3>{bucketName} ({bucketItems.length})</h3>
+                <div className="bucket-add-row">
+                  <input
+                    placeholder={`Add in ${bucketName}`}
+                    value={bucketDrafts[bucketName] || ""}
+                    onChange={(e) => setBucketDrafts((prev) => ({ ...prev, [bucketName]: e.target.value }))}
+                  />
+                  <button onClick={() => addTaskForBucket(bucketName)} disabled={busy}>Add</button>
                 </div>
-                <button onClick={() => markDone(task.id)} disabled={busy}>Mark Done</button>
-              </li>
-            ))}
-            {!openTasks.length ? <li className="muted">No open tasks</li> : null}
-          </ul>
-        ) : (
-          <div className="bucket-board">
-            {BUCKETS.map((bucketName) => {
-              const bucketTasks = anonOpenTasks.filter((t) => t.bucket === bucketName);
-              return (
-                <div className="bucket-column" key={bucketName}>
-                  <h3>{bucketName} ({bucketTasks.length})</h3>
-                  {bucketTasks.map((task, idx) => (
-                    <div className="task-card" key={task.id}>
+
+                {bucketItems.map((task, idx) => (
+                  <div className="task-card" key={task.id}>
+                    {!isSignedIn ? (
                       <input
                         value={task.task}
                         onChange={(e) => updateAnonymousTask(task.id, { task: e.target.value })}
                       />
-                      <div className="task-actions-row">
-                        <select
-                          value={task.bucket}
-                          onChange={(e) => updateAnonymousTask(task.id, { bucket: e.target.value })}
-                        >
-                          {BUCKETS.map((b) => (
-                            <option key={b} value={b}>{b}</option>
-                          ))}
-                        </select>
-                        <button onClick={() => moveAnonymousTaskWithinBucket(task.id, "up")} disabled={idx === 0}>↑</button>
-                        <button onClick={() => moveAnonymousTaskWithinBucket(task.id, "down")} disabled={idx === bucketTasks.length - 1}>↓</button>
-                        <button onClick={() => markDone(task.id)}>Done</button>
-                      </div>
+                    ) : (
+                      <strong>{task.task}</strong>
+                    )}
+
+                    <div className="task-actions-row">
+                      {!isSignedIn ? (
+                        <>
+                          <select
+                            value={task.bucket}
+                            onChange={(e) => updateAnonymousTask(task.id, { bucket: e.target.value })}
+                          >
+                            {BUCKETS.map((b) => (
+                              <option key={b} value={b}>{b}</option>
+                            ))}
+                          </select>
+                          <button onClick={() => moveAnonymousTaskWithinBucket(task.id, "up")} disabled={idx === 0}>↑</button>
+                          <button onClick={() => moveAnonymousTaskWithinBucket(task.id, "down")} disabled={idx === bucketItems.length - 1}>↓</button>
+                        </>
+                      ) : (
+                        <small>{task.bucket}</small>
+                      )}
+                      <button onClick={() => markDone(task.id)} disabled={busy}>Done</button>
                     </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        )}
+                  </div>
+                ))}
+              </div>
+            );
+          })}
+        </div>
       </section>
 
       <section className="panel">
-        <h2>{isSignedIn ? "Done Tasks" : `Done in Sandbox (${anonDoneTasks.length})`}</h2>
+        <h2>{isSignedIn ? "Done Tasks" : `Done in Sandbox (${doneTasks.length})`}</h2>
         <ul className="list">
-          {(isSignedIn ? tasks.filter((t) => t.status === "done") : anonDoneTasks).map((task) => (
+          {doneTasks.map((task) => (
             <li key={task.id}>
               <div>
                 <strong>{task.task}</strong>
@@ -598,9 +578,7 @@ export default function App() {
               <button onClick={() => reopenTask(task.id)} disabled={busy}>Reopen</button>
             </li>
           ))}
-          {(isSignedIn ? tasks.filter((t) => t.status === "done").length : anonDoneTasks.length) === 0 ? (
-            <li className="muted">No done tasks</li>
-          ) : null}
+          {doneTasks.length === 0 ? <li className="muted">No done tasks</li> : null}
         </ul>
       </section>
 
@@ -611,12 +589,7 @@ export default function App() {
             Provider
             <select
               value={aiSettings.provider || "openrouter"}
-              onChange={(e) =>
-                setAiSettings((prev) => ({
-                  ...prev,
-                  provider: e.target.value,
-                }))
-              }
+              onChange={(e) => setAiSettings((prev) => ({ ...prev, provider: e.target.value }))}
             >
               <option value="openai">openai</option>
               <option value="openrouter">openrouter</option>
@@ -645,7 +618,6 @@ export default function App() {
           </label>
         </div>
         <button onClick={saveAiModelSettings} disabled={busy || !isSignedIn}>Save AI Settings</button>
-        {!isSignedIn ? <small style={{ color: "var(--muted)" }}>Sign up for free to save provider/model settings.</small> : null}
       </section>
 
       <section className="panel">
