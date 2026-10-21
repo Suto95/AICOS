@@ -141,3 +141,34 @@ In Google Cloud Console, add an authorized redirect URI matching your deployed a
 - The active application package is `aicos/cosai_app/`
 - The root `aicos/` folder contains the current source tree and migration scripts
 - Root-level copies of data files exist for backward compatibility with older scripts
+
+## React Migration Runbook
+
+- 10-day low-intervention plan: `docs/migration/react-migration-10day-plan.md`
+- Requirements checklist: `docs/migration/migration-requirements-checklist.md`
+- Branching and rollback workflow: `docs/migration/branching-and-rollback-workflow.md`
+- API contract draft: `docs/migration/api-contract-v1.md`
+- Production deploy checklist: `docs/migration/production-deploy-checklist.md`
+- Release commands: `docs/migration/release-commands.md`
+- Daily automation script: `tools/migration/daily_migration_check.sh`
+- Safety snapshot script: `tools/migration/create_safety_snapshot.sh`
+- Predeploy verifier: `tools/migration/predeploy_verify.sh`
+- Release ready check: `tools/migration/release_ready_check.sh`
+
+Run daily validation:
+
+```bash
+./tools/migration/daily_migration_check.sh
+```
+
+Run production verification:
+
+```bash
+./tools/migration/predeploy_verify.sh --mode production --frontend-url https://your-frontend-domain.com/
+```
+
+Run full release readiness check:
+
+```bash
+./tools/migration/release_ready_check.sh --frontend-url https://your-frontend-domain.com/ --env-file .env.production
+```

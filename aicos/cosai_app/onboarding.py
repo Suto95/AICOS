@@ -10,11 +10,13 @@ from .accounts import (
     complete_google_oauth,
     disconnect_account,
     ensure_login_email_account,
+    get_redirect_uri,
     list_connected_accounts,
     pop_oauth_verifier,
     upsert_google_account,
 )
-from .data import migrate_local_data_to_user
+from .config import DEFAULT_OPENROUTER_BASE_URL, get_default_models
+from .data import load_ai_settings, migrate_local_data_to_user, save_ai_settings
 
 
 def render_account_setup(user):
@@ -23,7 +25,7 @@ def render_account_setup(user):
     st.caption("Connect and manage email accounts for task ingestion.")
     ensure_login_email_account(user["id"], user.get("email", ""))
 
-    redirect_uri = os.getenv("COSAI_REDIRECT_URI", "").strip()
+    redirect_uri = get_redirect_uri()
     missing_oauth_env = not redirect_uri
 
     qp = st.query_params
@@ -106,6 +108,31 @@ def render_account_setup(user):
             st.rerun()
         except Exception as exc:
             st.error(f"Migration failed: {exc}")
+
+    st.subheader("AI Provider Settings")
+    ai_settings = load_ai_settings(user["id"])
+    provider_options = ["openai", "openrouter"]
+    provider_idx = provider_options.index(ai_settings["provider"]) if ai_settings["provider"] in provider_options else 0
+
+    with st.container(border=True):
+        provider = st.selectbox("Provider", options=provider_options, index=provider_idx)
+        defaults = get_default_models(provider)
+        if provider != ai_settings.get("provider"):
+            try:
+                save_ai_settings(
+                    user_id=user["id"],
+                    provider=provider,
+                    primary_model=defaults["primary_model"],
+                    fallback_model=defaults["fallback_model"],
+                    api_key="",
+                    base_url=(DEFAULT_OPENROUTER_BASE_URL if provider == "openrouter" else ""),
+                    use_env_fallback=True,
+                )
+                st.session_state.ai_settings = load_ai_settings(user["id"])
+                st.toast("AI provider updated", icon="✅")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Failed to update AI settings: {exc}")
 
     if not accounts:
         st.caption("No email accounts connected yet.")

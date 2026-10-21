@@ -8,7 +8,10 @@ from .config import (
     IMPORTANCE_MAP,
     FIELD_CHOICES,
     INFER_THRESHOLDS,
-    client,
+    DEFAULT_LLM_PROVIDER,
+    create_chat_completion,
+    get_default_models,
+    normalize_llm_provider,
 )
 from .data import get_learned_weight
 
@@ -249,7 +252,10 @@ def is_task_like_message(message, hint_profile=None):
     snippet = (message.get("snippet") or "").lower()
     body = (message.get("body") or "").lower()
     sender = (message.get("sender") or "").lower()
-    hay = " ".join([subject, snippet, sender])
+    # Favor top-of-email body text so actionable asks in the latest message are not missed,
+    # while still avoiding deep quoted history from old threads.
+    body_head = body[:320]
+    hay = " ".join([subject, snippet, body_head, sender])
     summary_context = " ".join([subject, snippet])
     full_context = " ".join([subject, snippet, body, sender])
     token_set = tokenize_text(f"{subject} {snippet}")
@@ -462,8 +468,32 @@ def infer_missing_signals(task, prefs, memory):
 
 
 # ---------- scoring ----------
-def extract_task(message):
-    compact_text = build_compact_message_context(message)
+def _resolve_ai_runtime(ai_settings=None):
+    ai_settings = ai_settings or {}
+    provider = normalize_llm_provider(ai_settings.get("provider", DEFAULT_LLM_PROVIDER))
+    defaults = get_default_models(provider)
+
+    primary_model = defaults["primary_model"].strip()
+    fallback_model = defaults["fallback_model"].strip()
+    api_key = (ai_settings.get("api_key") or "").strip() or None
+    base_url = (ai_settings.get("base_url") or "").strip() or None
+    use_env_fallback = bool(ai_settings.get("use_env_fallback", True))
+
+    models = []
+    for model in (primary_model, fallback_model):
+        if model and model not in models:
+            models.append(model)
+
+    return {
+        "provider": provider,
+        "models": models,
+        "api_key": api_key,
+        "base_url": base_url,
+        "use_env_fallback": use_env_fallback,
+    }
+
+
+def _extract_task_with_model(compact_text, runtime, model):
     prompt = f"""
 Extract structured task.
 
@@ -483,13 +513,87 @@ Return JSON:
 - visibility
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    response = create_chat_completion(
+        provider=runtime["provider"],
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
+        api_key=runtime["api_key"],
+        base_url=runtime["base_url"],
+        allow_env_fallback=runtime["use_env_fallback"],
     )
 
-    return safe_json_parse(response.choices[0].message.content)
+    parsed = safe_json_parse(response.choices[0].message.content)
+    if not isinstance(parsed, dict) or not parsed.get("task"):
+        raise ValueError("Model response did not contain a valid task payload.")
+    return parsed
+
+
+def _extract_task_with_model_strict(compact_text, runtime, model):
+    prompt = f"""
+Extract structured task.
+
+Message:
+{compact_text}
+
+Return ONLY one valid JSON object with these exact keys:
+- task
+- deadline
+- urgency_signal
+- importance_signal
+- penalty_for_delay
+- blocks_others
+- outcome_value
+- strategic_alignment
+- reversibility
+- visibility
+
+Rules:
+- No markdown
+- No backticks
+- No explanation text
+- Use null for unknown values
+"""
+
+    response = create_chat_completion(
+        provider=runtime["provider"],
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        api_key=runtime["api_key"],
+        base_url=runtime["base_url"],
+        allow_env_fallback=runtime["use_env_fallback"],
+    )
+
+    parsed = safe_json_parse(response.choices[0].message.content)
+    if not isinstance(parsed, dict) or not parsed.get("task"):
+        raise ValueError("Model response did not contain a valid strict JSON task payload.")
+    return parsed
+
+
+def extract_task(message, ai_settings=None):
+    runtime = _resolve_ai_runtime(ai_settings)
+    compact_text = build_compact_message_context(message)
+    errors = []
+
+    for model in runtime["models"]:
+        try:
+            parsed = _extract_task_with_model(compact_text, runtime, model)
+            parsed["_llm_provider"] = runtime["provider"]
+            parsed["_llm_model"] = model
+            return parsed
+        except Exception as exc:
+            errors.append(f"{runtime['provider']}:{model} -> {exc}")
+            try:
+                parsed = _extract_task_with_model_strict(compact_text, runtime, model)
+                parsed["_llm_provider"] = runtime["provider"]
+                parsed["_llm_model"] = model
+                return parsed
+            except Exception as strict_exc:
+                errors.append(f"{runtime['provider']}:{model} (strict) -> {strict_exc}")
+
+    detail = errors[-1] if errors else "unknown error"
+    raise RuntimeError(f"Task extraction failed across configured models. Last error: {detail}")
 
 
 def compute_features(task, prefs):
@@ -573,12 +677,18 @@ def score_task(task, prefs):
     return score, bucket, reasoning
 
 
-def generate_reasoning(task):
+def generate_reasoning(task, ai_settings=None):
+    runtime = _resolve_ai_runtime(ai_settings)
+    model = runtime["models"][0]
     prompt = f"Explain why this task matters in 10 words:\n{task}"
-    res = client.chat.completions.create(
-        model="gpt-4.1-mini",
+    res = create_chat_completion(
+        provider=runtime["provider"],
+        model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
+        api_key=runtime["api_key"],
+        base_url=runtime["base_url"],
+        allow_env_fallback=runtime["use_env_fallback"],
     )
     return res.choices[0].message.content.strip()
 
@@ -687,14 +797,15 @@ def dedupe_results(results):
 
 
 # ---------- pipeline ----------
-def analyze_messages(messages, prefs, memory, hint_profile=None):
+def analyze_messages(messages, prefs, memory, hint_profile=None, ai_settings=None):
     results = []
+    errors = []
 
     filtered_messages = [m for m in messages if is_task_like_message(m, hint_profile=hint_profile)]
 
     for i, msg in enumerate(filtered_messages):
         try:
-            task = normalize_task(extract_task(msg))
+            task = normalize_task(extract_task(msg, ai_settings=ai_settings))
             if not task or not task.get("task"):
                 continue
             task["sender"] = msg.get("sender", "")
@@ -723,23 +834,15 @@ def analyze_messages(messages, prefs, memory, hint_profile=None):
                 }
             )
         except Exception as e:
-            results.append(
-                {
-                    "id": i,
-                    "task": f"Error processing message: {str(e)}",
-                    "score": 0,
-                    "bucket": "ERROR",
-                    "predicted_bucket": "ERROR",
-                    "reason": [],
-                    "meta": {"task": "error"},
-                    "inferred": {},
-                    "status": "open",
-                    "manual_override": False,
-                    "override_comment": "",
-                    "source": "email",
-                    "created_at": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
-                }
-            )
+            # Surface missing provider API key to the UI immediately instead of hiding it as an ERROR task.
+            if isinstance(e, RuntimeError) and "API key is missing" in str(e):
+                raise
+            errors.append(str(e))
+
+    if errors and not results:
+        first_error = errors[0]
+        if len(errors) > 1:
+            raise RuntimeError(f"Error processing messages ({len(errors)} failures): {first_error}")
+        raise RuntimeError(f"Error processing message: {first_error}")
 
     return dedupe_results(results)

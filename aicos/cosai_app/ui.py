@@ -201,13 +201,25 @@ def render_task_board(user):
                     if not account:
                         st.error("Selected account is not active. Reconnect from Account Setup.")
                         st.stop()
+                    query_filter = (account.get("query_filter") or DEFAULT_GMAIL_QUERY_FILTER).strip()
+                    effective_query = query_filter
+                    used_fallback_query = False
                     fetch_connected = getattr(gmail_ingest, "fetch_emails_for_account", None)
                     if fetch_connected is not None:
                         messages, refreshed = fetch_connected(
                             account=account,
                             max_results=FETCH_LIMIT,
-                            query=DEFAULT_GMAIL_QUERY_FILTER,
+                            query=query_filter,
                         )
+                        if not messages and query_filter == DEFAULT_GMAIL_QUERY_FILTER:
+                            # Fallback for inboxes where Primary is sparse/disabled.
+                            effective_query = "newer_than:30d"
+                            messages, refreshed = fetch_connected(
+                                account=account,
+                                max_results=FETCH_LIMIT,
+                                query=effective_query,
+                            )
+                            used_fallback_query = True
                     else:
                         # Backward-compat path if an old gmail_ingest module is loaded.
                         legacy_fetch = getattr(gmail_ingest, "fetch_emails", None)
@@ -217,7 +229,9 @@ def render_task_board(user):
                             )
                         messages = legacy_fetch(FETCH_LIMIT)
                         refreshed = account
+                    pre_window_count = len(messages)
                     messages = _filter_messages_by_duration(messages, DURATION_OPTIONS[duration_label])
+                    post_window_count = len(messages)
                     update_account_tokens(
                         user_id=user["id"],
                         account_id=account["id"],
@@ -227,6 +241,12 @@ def render_task_board(user):
                     )
                     update_account_fetch_success(user["id"], account["id"])
                     st.session_state.latest_messages = messages
+                    st.session_state.latest_fetch_query = effective_query
+                    st.session_state.latest_fetch_counts = {
+                        "pre_window": pre_window_count,
+                        "post_window": post_window_count,
+                        "used_fallback": used_fallback_query,
+                    }
                 with st.spinner("Analyzing tasks with LLM..."):
                     user_events = load_events(limit=1000, user_id=user["id"])
                     global_events = load_events_all_users(limit=5000, exclude_user_id=user["id"])
@@ -247,6 +267,7 @@ def render_task_board(user):
                         st.session_state.prefs,
                         st.session_state.memory,
                         hint_profile=hint_profile,
+                        ai_settings=st.session_state.get("ai_settings"),
                     )
                     st.session_state.results, added_count, added_results = merge_new_results(
                         st.session_state.results,
@@ -272,11 +293,27 @@ def render_task_board(user):
                     f"Added {added_count} new task(s) from {duration_label.lower()}. "
                     f"Total tasks: {len(st.session_state.results)}."
                 )
+                fetch_counts = st.session_state.get("latest_fetch_counts", {})
+                if fetch_counts.get("used_fallback"):
+                    st.info(
+                        "No emails matched default primary-inbox filter. "
+                        "Used broader fallback query: newer_than:30d"
+                    )
+                if fetch_counts.get("pre_window", 0) == 0:
+                    st.warning(
+                        "No emails fetched for this account/query. "
+                        "Try a broader account query filter in the database or reconnect the account."
+                    )
+                elif fetch_counts.get("post_window", 0) == 0:
+                    st.warning(
+                        "Emails were fetched but none were inside the selected fetch window. "
+                        "Try a wider window such as Last 7 days."
+                    )
             except Exception as e:
                 account_id = st.session_state.get("selected_account_id")
                 if account_id is not None:
                     update_account_health(user["id"], int(account_id), status="error", error_msg=str(e))
-                st.error(f"Fetch/analyze failed: {e}")
+                st.toast(f"Fetch/analyze failed: {e}", icon="⚠️")
     with top_d:
         if st.button("➕ Add task", use_container_width=True, help="Add new task"):
             st.session_state.show_add_task = not st.session_state.show_add_task

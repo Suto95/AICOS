@@ -89,6 +89,15 @@ class TestHintLearning(unittest.TestCase):
         }
         self.assertTrue(is_task_like_message(message))
 
+    def test_is_task_like_message_detects_action_in_body_head(self):
+        message = {
+            "subject": "Checking in",
+            "snippet": "Hope you are doing well",
+            "body": "Hey Sumesh, can we connect for the go live plan? I would like to review the deck tomorrow.",
+            "sender": "teammate@example.com",
+        }
+        self.assertTrue(is_task_like_message(message))
+
     def test_load_persisted_tasks_applies_task_description_edits(self):
         events = [
             {

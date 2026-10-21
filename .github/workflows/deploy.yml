@@ -25,8 +25,13 @@ jobs:
 
     - name: Run tests
       run: |
-        # Add your test commands here
-        python -c "import cosai_app; print('Import test passed')"
+        PYTHONPATH=. python -m py_compile \
+          aicos/cosai_app/streamlit_app.py \
+          aicos/cosai_app/ui.py \
+          aicos/cosai_app/logic.py \
+          aicos/api/main.py
+        PYTHONPATH=. python -c "from aicos.api.main import app; print('API import test passed')"
+        PYTHONPATH=. python -m unittest -q archive.tests.aicos_api.test_api_migration
 
     - name: Lint with flake8
       run: |
@@ -47,3 +52,4 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         python -c "from pathlib import Path; assert Path('aicos/cosai_app/streamlit_app.py').exists()"
+        python -c "from pathlib import Path; assert Path('aicos/api/main.py').exists()"

@@ -152,6 +152,18 @@ def init_db():
                 FOREIGN KEY(user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS ai_provider_settings (
+                user_id INTEGER PRIMARY KEY,
+                provider TEXT NOT NULL DEFAULT 'openai',
+                primary_model TEXT NOT NULL,
+                fallback_model TEXT NOT NULL,
+                api_key TEXT DEFAULT '',
+                base_url TEXT DEFAULT '',
+                use_env_fallback INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+
             CREATE TABLE IF NOT EXISTS task_memory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -212,6 +224,17 @@ def init_postgres_db():
             CREATE TABLE IF NOT EXISTS user_prefs (
                 user_id INTEGER PRIMARY KEY REFERENCES users(id),
                 prefs_json JSONB NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_provider_settings (
+                user_id INTEGER PRIMARY KEY REFERENCES users(id),
+                provider TEXT NOT NULL DEFAULT 'openai',
+                primary_model TEXT NOT NULL,
+                fallback_model TEXT NOT NULL,
+                api_key TEXT DEFAULT '',
+                base_url TEXT DEFAULT '',
+                use_env_fallback BOOLEAN NOT NULL DEFAULT TRUE,
                 updated_at TIMESTAMP NOT NULL
             );
 

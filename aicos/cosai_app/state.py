@@ -1,7 +1,7 @@
 import copy
 import streamlit as st
 
-from .data import load_memory, load_persisted_tasks, load_prefs
+from .data import load_ai_settings, load_memory, load_persisted_tasks, load_prefs
 
 
 def init_state(user_id=None):
@@ -13,6 +13,7 @@ def init_state(user_id=None):
         st.session_state.prefs = load_prefs(user_id=user_id)
         st.session_state.memory = load_memory(user_id=user_id)
         st.session_state.results = load_persisted_tasks(user_id=user_id)
+        st.session_state.ai_settings = load_ai_settings(user_id=user_id)
         st.session_state.latest_messages = []
         st.session_state.undo_stack = []
         st.session_state.show_add_task = False
@@ -26,6 +27,8 @@ def init_state(user_id=None):
         st.session_state.results = load_persisted_tasks(user_id=user_id) if user_id is not None else []
     if "memory" not in st.session_state:
         st.session_state.memory = load_memory(user_id=user_id)
+    if "ai_settings" not in st.session_state:
+        st.session_state.ai_settings = load_ai_settings(user_id=user_id)
     if "latest_messages" not in st.session_state:
         st.session_state.latest_messages = []
     if "undo_stack" not in st.session_state:

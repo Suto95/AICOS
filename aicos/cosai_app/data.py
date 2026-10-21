@@ -2,8 +2,17 @@ import json
 import os
 from datetime import datetime
 
-from .config import PREF_FILE, MEMORY_FILE, EVENT_FILE, SIGNAL_FIELDS
+from .config import (
+    PREF_FILE,
+    MEMORY_FILE,
+    EVENT_FILE,
+    SIGNAL_FIELDS,
+    DEFAULT_LLM_PROVIDER,
+    get_default_models,
+    normalize_llm_provider,
+)
 from .db import get_conn, init_db
+from .security import decrypt_secret, encrypt_secret
 
 
 def _load_prefs_file():
@@ -30,6 +39,127 @@ def _decode_json_payload(value, fallback):
         return json.loads(value)
     except (TypeError, json.JSONDecodeError):
         return fallback
+
+
+def _default_ai_settings(provider=DEFAULT_LLM_PROVIDER):
+    provider = normalize_llm_provider(provider)
+    defaults = get_default_models(provider)
+    return {
+        "provider": provider,
+        "primary_model": defaults["primary_model"],
+        "fallback_model": defaults["fallback_model"],
+        "api_key": "",
+        "base_url": "",
+        "use_env_fallback": True,
+    }
+
+
+def load_ai_settings(user_id=None):
+    if user_id is None:
+        return _default_ai_settings()
+
+    init_db()
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT provider, primary_model, fallback_model, api_key, base_url, use_env_fallback
+            FROM ai_provider_settings
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()
+
+    if not row:
+        return _default_ai_settings()
+
+    provider = normalize_llm_provider(row["provider"])
+    defaults = get_default_models(provider)
+    decrypted_key = ""
+    if row["api_key"]:
+        try:
+            decrypted_key = decrypt_secret(row["api_key"])
+        except RuntimeError:
+            decrypted_key = ""
+
+    return {
+        "provider": provider,
+        "primary_model": (row["primary_model"] or defaults["primary_model"]).strip(),
+        "fallback_model": (row["fallback_model"] or defaults["fallback_model"]).strip(),
+        "api_key": decrypted_key,
+        "base_url": (row["base_url"] or "").strip(),
+        "use_env_fallback": bool(row["use_env_fallback"]),
+    }
+
+
+def save_ai_settings(
+    user_id,
+    provider,
+    primary_model=None,
+    fallback_model=None,
+    api_key=None,
+    base_url=None,
+    use_env_fallback=True,
+):
+    init_db()
+    provider = normalize_llm_provider(provider)
+    defaults = get_default_models(provider)
+    primary_model = (primary_model or defaults["primary_model"]).strip()
+    fallback_model = (fallback_model or defaults["fallback_model"]).strip()
+    if base_url is None:
+        base_url = ""
+    base_url = (base_url or "").strip()
+    now = datetime.now().isoformat()
+
+    with get_conn() as conn:
+        existing = conn.execute(
+            "SELECT user_id, api_key FROM ai_provider_settings WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if api_key is None:
+            encrypted_key = (existing["api_key"] if existing else "") or ""
+        else:
+            encrypted_key = encrypt_secret((api_key or "").strip())
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE ai_provider_settings
+                SET provider = ?, primary_model = ?, fallback_model = ?, api_key = ?,
+                    base_url = ?, use_env_fallback = ?, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (
+                    provider,
+                    primary_model,
+                    fallback_model,
+                    encrypted_key,
+                    base_url,
+                    1 if use_env_fallback else 0,
+                    now,
+                    user_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO ai_provider_settings(
+                    user_id, provider, primary_model, fallback_model, api_key,
+                    base_url, use_env_fallback, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    provider,
+                    primary_model,
+                    fallback_model,
+                    encrypted_key,
+                    base_url,
+                    1 if use_env_fallback else 0,
+                    now,
+                ),
+            )
+        conn.commit()
 
 
 def load_prefs(user_id=None):
