@@ -31,6 +31,29 @@ body {
   padding: 2rem 1rem 4rem;
 }
 
+.floating-auth {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 20;
+}
+
+.auth-toggle {
+  width: auto;
+  padding: 0.55rem 0.9rem;
+}
+
+.auth-popover {
+  margin-top: 0.45rem;
+  width: 240px;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0.7rem;
+  background: rgba(255, 255, 255, 0.95);
+  display: grid;
+  gap: 0.45rem;
+}
+
 .hero {
   padding: 1.2rem 1.3rem;
   border: 1px solid var(--line);
@@ -85,6 +108,23 @@ body {
   padding: 1rem;
   background: var(--card);
   backdrop-filter: blur(4px);
+}
+
+.warning-banner {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.4rem;
+  border-color: rgba(164, 48, 48, 0.35);
+}
+
+.merge-panel {
+  margin-top: 0.9rem;
+}
+
+.merge-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
 }
 
 .panel h2 {
@@ -207,6 +247,44 @@ label {
 .list li small {
   display: block;
   color: var(--muted);
+}
+
+.bucket-board {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.8rem;
+}
+
+.bucket-column {
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  padding: 0.65rem;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.bucket-column h3 {
+  margin: 0 0 0.45rem;
+  font-size: 0.92rem;
+}
+
+.task-card {
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.task-actions-row {
+  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 0.35rem;
+}
+
+.task-actions-row button {
+  width: auto;
+  padding: 0.42rem 0.55rem;
 }
 
 .account-row {
