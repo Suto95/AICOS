@@ -3,6 +3,8 @@ import {
   completeGoogleOAuth,
   createTask,
   disconnectAccount,
+  fetchAnalyze,
+  getAiSettings,
   getAccounts,
   getHealth,
   getSessionMe,
@@ -11,10 +13,12 @@ import {
   refreshSessionToken,
   setTaskStatus,
   startGoogleOAuth,
+  updateAiSettings,
   updateQueryFilter,
 } from "./api";
 
 const BUCKETS = ["DO NOW", "SCHEDULE", "DELEGATE", "REVIEW LATER", "ELIMINATE"];
+const DURATION_OPTIONS = ["Last 3 hours", "Last 24 hours", "Last 3 days", "Last 7 days"];
 
 export default function App() {
   const [sessionToken, setSessionToken] = useState(localStorage.getItem("aicos_session_token") || "");
@@ -28,6 +32,14 @@ export default function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [oauthBusy, setOauthBusy] = useState(false);
+  const [durationLabel, setDurationLabel] = useState("Last 24 hours");
+  const [aiSettings, setAiSettings] = useState({
+    provider: "openrouter",
+    primary_model: "openrouter/free",
+    fallback_model: "openrouter/free",
+    base_url: "",
+    use_env_fallback: true,
+  });
 
   const openTasks = useMemo(() => tasks.filter((t) => t.status === "open"), [tasks]);
 
@@ -110,9 +122,13 @@ export default function App() {
         getAccounts(targetToken),
         getInsightsSummary(targetToken),
       ]);
+      const settingsResp = await getAiSettings(targetToken).catch(() => null);
       setTasks(taskResp.items || []);
       setAccounts(accountResp.items || []);
       setInsights(insightResp);
+      if (settingsResp) {
+        setAiSettings(settingsResp);
+      }
     } catch (e) {
       setError(String(e.message || e));
     } finally {
@@ -190,6 +206,52 @@ export default function App() {
     }
   }
 
+  async function runFetchAnalyze() {
+    if (!sessionToken) {
+      setError("Sign in with Google to fetch and analyze emails.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const active = (accounts || []).filter((a) => a.status === "active");
+      const accountId = active.length ? active[0].id : null;
+      const payload = {
+        account_id: accountId,
+        duration_label: durationLabel,
+        persist: true,
+      };
+      await fetchAnalyze(sessionToken, payload);
+      await loadAll();
+    } catch (e) {
+      setError(String(e.message || e));
+      setBusy(false);
+    }
+  }
+
+  async function saveAiModelSettings() {
+    if (!sessionToken) {
+      setError("Sign in with Google to update AI settings.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const updated = await updateAiSettings(sessionToken, {
+        provider: aiSettings.provider,
+        primary_model: aiSettings.primary_model,
+        fallback_model: aiSettings.fallback_model,
+        base_url: aiSettings.base_url || "",
+        use_env_fallback: Boolean(aiSettings.use_env_fallback),
+      });
+      setAiSettings(updated);
+      await loadAll();
+    } catch (e) {
+      setError(String(e.message || e));
+      setBusy(false);
+    }
+  }
+
   function signOut() {
     setSessionToken("");
     setCurrentUser(null);
@@ -242,6 +304,21 @@ export default function App() {
         </article>
 
         <article className="panel">
+          <h2>Fetch + Analyze</h2>
+          <div className="stack">
+            <label>
+              Fetch window
+              <select value={durationLabel} onChange={(e) => setDurationLabel(e.target.value)}>
+                {DURATION_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </label>
+            <button onClick={runFetchAnalyze} disabled={busy || !isSignedIn}>Fetch + Analyze</button>
+          </div>
+        </article>
+
+        <article className="panel">
           <h2>Insights</h2>
           <div className="kpi-grid">
             <div><span>Active</span><strong>{insights?.active_tasks ?? "-"}</strong></div>
@@ -266,6 +343,49 @@ export default function App() {
           ))}
           {!openTasks.length ? <li className="muted">No open tasks</li> : null}
         </ul>
+      </section>
+
+      <section className="panel">
+        <h2>AI Model Settings</h2>
+        <div className="grid">
+          <label>
+            Provider
+            <select
+              value={aiSettings.provider || "openrouter"}
+              onChange={(e) =>
+                setAiSettings((prev) => ({
+                  ...prev,
+                  provider: e.target.value,
+                }))
+              }
+            >
+              <option value="openai">openai</option>
+              <option value="openrouter">openrouter</option>
+            </select>
+          </label>
+          <label>
+            Primary Model
+            <input
+              value={aiSettings.primary_model || ""}
+              onChange={(e) => setAiSettings((prev) => ({ ...prev, primary_model: e.target.value }))}
+            />
+          </label>
+          <label>
+            Fallback Model
+            <input
+              value={aiSettings.fallback_model || ""}
+              onChange={(e) => setAiSettings((prev) => ({ ...prev, fallback_model: e.target.value }))}
+            />
+          </label>
+          <label>
+            Base URL
+            <input
+              value={aiSettings.base_url || ""}
+              onChange={(e) => setAiSettings((prev) => ({ ...prev, base_url: e.target.value }))}
+            />
+          </label>
+        </div>
+        <button onClick={saveAiModelSettings} disabled={busy || !isSignedIn}>Save AI Settings</button>
       </section>
 
       <section className="panel">

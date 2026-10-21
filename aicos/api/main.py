@@ -1,5 +1,6 @@
 import os
 from datetime import datetime
+from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Header, HTTPException
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from aicos.cosai_app.config import BUCKET_ORDER
 from aicos.cosai_app.accounts import (
+    DEFAULT_GMAIL_QUERY_FILTER,
     build_google_auth_url,
     cache_oauth_verifier,
     complete_google_oauth,
@@ -14,16 +16,23 @@ from aicos.cosai_app.accounts import (
     disconnect_account,
     list_connected_accounts,
     pop_oauth_verifier,
+    get_active_account,
     upsert_google_account,
+    update_account_fetch_success,
+    update_account_health,
+    update_account_tokens,
     update_account_query_filter,
 )
+from aicos.cosai_app import gmail_ingest
 from aicos.cosai_app.data import (
     append_event,
     load_events,
     load_events_all_users,
+    load_ai_settings,
     load_memory,
     load_persisted_tasks,
     load_prefs,
+    save_ai_settings,
 )
 from aicos.cosai_app.db import get_conn, init_db
 from aicos.cosai_app.logic import (
@@ -36,6 +45,10 @@ from aicos.cosai_app.logic import (
 from .schemas import (
     AnalyzeRequest,
     AnalyzeResponse,
+    FetchAnalyzeRequest,
+    FetchAnalyzeResponse,
+    AiSettingsResponse,
+    AiSettingsUpdateRequest,
     AccountListResponse,
     AccountQueryFilterRequest,
     ApiError,
@@ -58,6 +71,13 @@ from .session_auth import create_session_token, decode_session_token, refresh_se
 
 
 app = FastAPI(title="AICOS Migration API", version="0.1.0")
+
+DURATION_OPTIONS = {
+    "Last 3 hours": timedelta(hours=3),
+    "Last 24 hours": timedelta(hours=24),
+    "Last 3 days": timedelta(days=3),
+    "Last 7 days": timedelta(days=7),
+}
 
 
 @app.on_event("startup")
@@ -139,6 +159,25 @@ def _task_event_payload(task: Dict[str, Any], extra: Optional[Dict[str, Any]] = 
     if task.get("manual_rank") is not None:
         payload["task_snapshot"]["manual_rank"] = task.get("manual_rank")
     return payload
+
+
+def _filter_messages_by_duration(messages: List[Dict[str, Any]], window: timedelta) -> List[Dict[str, Any]]:
+    now = datetime.now().astimezone()
+    cutoff = now - window
+    filtered: List[Dict[str, Any]] = []
+    for msg in messages:
+        raw_ts = msg.get("timestamp", "")
+        if not raw_ts:
+            continue
+        try:
+            ts = datetime.fromisoformat(raw_ts)
+        except ValueError:
+            continue
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=now.tzinfo)
+        if ts >= cutoff:
+            filtered.append(msg)
+    return filtered
 
 
 def _find_or_create_user(email: str) -> Dict[str, Any]:
@@ -464,6 +503,157 @@ def analyze_my_messages(
 ) -> AnalyzeResponse:
     user_id = _require_user_id(x_user_id, authorization)
     return analyze(user_id=user_id, req=req)
+
+
+@app.post(
+    "/v1/me/tasks/fetch-analyze",
+    response_model=FetchAnalyzeResponse,
+    responses={400: {"model": ApiError}, 401: {"model": ApiError}, 500: {"model": ApiError}},
+)
+def fetch_and_analyze_my_messages(
+    req: FetchAnalyzeRequest,
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> FetchAnalyzeResponse:
+    user_id = _require_user_id(x_user_id, authorization)
+
+    try:
+        account_id = req.account_id
+        if account_id is None:
+            active = [a for a in list_connected_accounts(user_id) if a.get("status") == "active"]
+            if not active:
+                raise HTTPException(status_code=400, detail="No active Gmail account connected")
+            account_id = int(active[0]["id"])
+
+        account = get_active_account(user_id, int(account_id))
+        if not account:
+            raise HTTPException(status_code=400, detail="Selected account is not active")
+
+        window = DURATION_OPTIONS.get(req.duration_label, DURATION_OPTIONS["Last 24 hours"])
+        query_filter = (account.get("query_filter") or DEFAULT_GMAIL_QUERY_FILTER).strip()
+        effective_query = query_filter
+        used_fallback_query = False
+
+        fetch_connected = getattr(gmail_ingest, "fetch_emails_for_account", None)
+        if fetch_connected is None:
+            raise HTTPException(status_code=500, detail="Gmail fetch integration is unavailable")
+
+        messages, refreshed = fetch_connected(
+            account=account,
+            max_results=200,
+            query=query_filter,
+        )
+        if not messages and query_filter == DEFAULT_GMAIL_QUERY_FILTER:
+            effective_query = "newer_than:30d"
+            messages, refreshed = fetch_connected(
+                account=account,
+                max_results=200,
+                query=effective_query,
+            )
+            used_fallback_query = True
+
+        pre_window_count = len(messages)
+        messages = _filter_messages_by_duration(messages, window)
+        post_window_count = len(messages)
+
+        update_account_tokens(
+            user_id=user_id,
+            account_id=int(account_id),
+            access_token=refreshed.get("access_token", account.get("access_token", "")),
+            refresh_token=refreshed.get("refresh_token", account.get("refresh_token", "")),
+            token_expiry=refreshed.get("token_expiry", account.get("token_expiry", "")),
+        )
+        update_account_fetch_success(user_id, int(account_id))
+
+        prefs = load_prefs(user_id=user_id)
+        memory = load_memory(user_id=user_id)
+        user_events = load_events(limit=1000, user_id=user_id)
+        global_events = load_events_all_users(limit=5000, exclude_user_id=user_id)
+        user_hint = derive_user_hint_profile(user_events, account_id=int(account_id))
+        global_hint = derive_user_hint_profile(global_events)
+        hint_profile = merge_hint_profiles(user_hint, global_hint)
+
+        ai_settings = dict(req.ai_settings.model_dump(exclude_none=True)) if req.ai_settings else load_ai_settings(user_id)
+        rows = analyze_messages(
+            messages,
+            prefs,
+            memory,
+            hint_profile=hint_profile,
+            ai_settings=ai_settings,
+        )
+        rows = _to_dict_list(rows)
+
+        if req.persist:
+            current_tasks = load_persisted_tasks(user_id=user_id)
+            next_id = max((r.get("id", -1) for r in current_tasks), default=-1) + 1
+            for row in rows:
+                row["id"] = next_id
+                next_id += 1
+                append_event(
+                    "task_imported_email",
+                    row["id"],
+                    row.get("task", ""),
+                    _task_event_payload(row, {"source": "email", "bucket": row.get("bucket"), "account_id": int(account_id)}),
+                    user_id=user_id,
+                )
+
+        return FetchAnalyzeResponse(
+            items=rows,
+            pre_window_count=pre_window_count,
+            post_window_count=post_window_count,
+            used_fallback_query=used_fallback_query,
+            effective_query=effective_query,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        account_id = req.account_id
+        if account_id is not None:
+            try:
+                update_account_health(user_id, int(account_id), status="error", error_msg=str(exc))
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail=f"Fetch/analyze failed: {exc}") from exc
+
+
+@app.get(
+    "/v1/me/ai-settings",
+    response_model=AiSettingsResponse,
+    responses={400: {"model": ApiError}, 401: {"model": ApiError}},
+)
+def get_my_ai_settings(
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> AiSettingsResponse:
+    user_id = _require_user_id(x_user_id, authorization)
+    settings = load_ai_settings(user_id)
+    return AiSettingsResponse(**settings)
+
+
+@app.put(
+    "/v1/me/ai-settings",
+    response_model=AiSettingsResponse,
+    responses={400: {"model": ApiError}, 401: {"model": ApiError}, 500: {"model": ApiError}},
+)
+def update_my_ai_settings(
+    req: AiSettingsUpdateRequest,
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> AiSettingsResponse:
+    user_id = _require_user_id(x_user_id, authorization)
+    try:
+        save_ai_settings(
+            user_id=user_id,
+            provider=req.provider,
+            primary_model=req.primary_model,
+            fallback_model=req.fallback_model,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            use_env_fallback=req.use_env_fallback,
+        )
+        return AiSettingsResponse(**load_ai_settings(user_id))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update AI settings: {exc}") from exc
 
 
 @app.get(

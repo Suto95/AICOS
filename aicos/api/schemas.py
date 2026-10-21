@@ -61,6 +61,39 @@ class AnalyzeResponse(BaseModel):
     items: List[Dict[str, Any]]
 
 
+class FetchAnalyzeRequest(BaseModel):
+    account_id: Optional[int] = None
+    duration_label: str = "Last 24 hours"
+    persist: bool = True
+    ai_settings: Optional[AiSettingsIn] = None
+
+
+class FetchAnalyzeResponse(BaseModel):
+    items: List[Dict[str, Any]]
+    pre_window_count: int
+    post_window_count: int
+    used_fallback_query: bool = False
+    effective_query: str = ""
+
+
+class AiSettingsResponse(BaseModel):
+    provider: str
+    primary_model: str
+    fallback_model: str
+    api_key: str = ""
+    base_url: str = ""
+    use_env_fallback: bool = True
+
+
+class AiSettingsUpdateRequest(BaseModel):
+    provider: str
+    primary_model: Optional[str] = None
+    fallback_model: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    use_env_fallback: bool = True
+
+
 class InsightsSummaryResponse(BaseModel):
     active_tasks: int
     done_tasks: int

@@ -119,3 +119,25 @@ export function completeGoogleOAuth(code, state, redirectUri) {
     }),
   });
 }
+
+export function fetchAnalyze(sessionToken, payload) {
+  return request("/v1/me/tasks/fetch-analyze", {
+    method: "POST",
+    headers: authHeaders(sessionToken),
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function getAiSettings(sessionToken) {
+  return request("/v1/me/ai-settings", {
+    headers: authHeaders(sessionToken),
+  });
+}
+
+export function updateAiSettings(sessionToken, payload) {
+  return request("/v1/me/ai-settings", {
+    method: "PUT",
+    headers: authHeaders(sessionToken),
+    body: JSON.stringify(payload || {}),
+  });
+}
